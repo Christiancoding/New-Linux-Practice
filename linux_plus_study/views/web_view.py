@@ -27,13 +27,8 @@ class LinuxPlusStudyWeb:
     def __init__(self, game_state, debug=False):
         self.game_state = game_state
         self.app = Flask(__name__, 
-                         template_folder=os.path.join(os.path.dirname(__file__), '..', 'templates'),
-                         static_folder=os.path.join(os.path.dirname(__file__), '..', 'static'))
-        self.debug = debug
-        self.window = None
-        
-        self.game_state = game_state
-        self.app = Flask(__name__, ...)
+                        template_folder=os.path.join(os.path.dirname(__file__), '..', 'templates'),
+                        static_folder=os.path.join(os.path.dirname(__file__), '..', 'static'))
         self.debug = debug
         self.window = None
 
@@ -42,6 +37,16 @@ class LinuxPlusStudyWeb:
         
         self.quiz_controller = QuizController(game_state)
         self.stats_controller = StatsController(game_state)
+        self.quiz_active = False
+        self.current_streak = 0
+        self.current_quiz_mode = None
+        self.current_category_filter = None
+        self.current_question_data = None
+        self.current_question_index = -1
+        self.quick_fire_start_time = None
+        self.quick_fire_questions_answered = 0
+        self.last_daily_challenge_date = None
+        self.daily_challenge_completed = False
         
         self.setup_routes()
     
@@ -89,70 +94,98 @@ class LinuxPlusStudyWeb:
             quiz_mode = data.get('mode', 'standard')
             category = data.get('category')
             
-            result = self.quiz_controller.start_quiz_session(
-                mode=quiz_mode,
-                category_filter=None if category == "All Categories" else category
-            )
-            
-            return jsonify(result)
+            try:
+                result = self.quiz_controller.start_quiz_session(
+                    mode=quiz_mode,
+                    category_filter=None if category == "All Categories" else category
+                )
+                
+                if result:
+                    self.quiz_active = True
+                    self.current_quiz_mode = quiz_mode
+                    self.current_category_filter = result.get('category_filter')
+                    return jsonify({'success': True, **result})
+                else:
+                    return jsonify({'success': False, 'error': 'Failed to start quiz session'})
+                    
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
         @self.app.route('/api/get_question')
         def api_get_question():
-            result = self.quiz_controller.get_next_question()
-            if result is None:
-                return jsonify({'quiz_complete': True})
-            return jsonify(result)
+            try:
+                if not self.quiz_controller.quiz_active:
+                    return jsonify({'quiz_complete': True})
+                    
+                result = self.quiz_controller.get_next_question(self.current_category_filter)
+                
+                if result is None:
+                    return jsonify({'quiz_complete': True})
+                    
+                # Store current question info for submit_answer
+                self.current_question_data = result['question_data']
+                self.current_question_index = result['original_index']
+                
+                # Format response for web interface
+                q_text, options, _, category, _ = result['question_data']
+                
+                return jsonify({
+                    'question': q_text,
+                    'options': options,
+                    'category': category,
+                    'question_number': result['question_number'],
+                    'streak': result.get('streak', 0),
+                    'mode': self.quiz_controller.current_quiz_mode,
+                    'is_single_question': self.quiz_controller.current_quiz_mode in ['daily_challenge', 'pop_quiz']
+                })
+                
+            except Exception as e:
+                return jsonify({'error': str(e)})
 
         @self.app.route('/api/submit_answer', methods=['POST'])
         def api_submit_answer():
-            data = request.get_json()
-            user_answer_index = data.get('answer_index')
-            
-            if not self.quiz_controller.quiz_active:
-                return jsonify({'error': 'No active quiz session'})
-            
-            # Get current question from controller
-            question_data = self.quiz_controller.current_question_data
-            original_index = self.quiz_controller.current_question_index
-            
-            result = self.quiz_controller.submit_answer(
-                question_data, user_answer_index, original_index
-            )
-            
-            return jsonify(result)
+            try:
+                data = request.get_json()
+                user_answer_index = data.get('answer_index')
+                
+                if not self.quiz_controller.quiz_active:
+                    return jsonify({'error': 'No active quiz session'})
+                    
+                if self.current_question_data is None:
+                    return jsonify({'error': 'No current question'})
+                
+                result = self.quiz_controller.submit_answer(
+                    self.current_question_data, 
+                    user_answer_index, 
+                    self.current_question_index
+                )
+                
+                self.current_streak = result.get('streak', 0)
+                
+                return jsonify(result)
+                
+            except Exception as e:
+                return jsonify({'error': str(e)})
         
         @self.app.route('/api/end_quiz', methods=['POST'])
         def api_end_quiz():
-            """End the current quiz session."""
-            if not self.quiz_active:
-                return jsonify({'error': 'No active quiz session'})
-            
-            self.quiz_active = False
-            
-            # Calculate final stats
-            accuracy = (self.game_state.score / self.game_state.total_questions_session * 100) if self.game_state.total_questions_session > 0 else 0
-            
-            # Update leaderboard
-            if self.game_state.total_questions_session > 0:
-                self.game_state.update_leaderboard(
-                    self.game_state.score,
-                    self.game_state.total_questions_session,
-                    self.game_state.session_points
-                )
-            
-            # Check for perfect session
-            if accuracy == 100 and self.game_state.total_questions_session >= 3:
-                if "perfect_session" not in self.game_state.achievements["badges"]:
-                    self.game_state.achievements["badges"].append("perfect_session")
-            
-            self.game_state.save_history()
-            self.game_state.save_achievements()
-            
-            return jsonify({
-                'session_score': self.game_state.score,
-                'session_total': self.game_state.total_questions_session,
-                'accuracy': accuracy,
-                'session_points': self.game_state.session_points
-            })
+            try:
+                if not self.quiz_controller.quiz_active:
+                    return jsonify({'error': 'No active quiz session'})
+                
+                result = self.quiz_controller.end_session()
+                
+                # Reset web interface state
+                self.quiz_active = False
+                self.current_quiz_mode = None
+                self.current_category_filter = None
+                self.current_question_data = None
+                self.current_question_index = -1
+                self.current_streak = 0
+                
+                return jsonify(result)
+                
+            except Exception as e:
+                return jsonify({'error': str(e)})
         
         @self.app.route('/api/statistics')
         def api_statistics():
