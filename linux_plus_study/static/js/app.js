@@ -243,3 +243,126 @@ function debounce(func, wait) {
 
 // Debounced status updates
 const debouncedUpdateStatus = debounce(updateStatus, 250);
+// Improved settings management
+function saveSettings() {
+    try {
+        // Test localStorage availability
+        if (typeof(Storage) === "undefined") {
+            showAlert('Your browser does not support local storage. Settings cannot be saved.', 'warning');
+            return;
+        }
+        
+        const settings = {
+            focusMode: document.getElementById('focusMode')?.checked || false,
+            breakReminder: parseInt(document.getElementById('breakReminder')?.value) || 10,
+            timestamp: Date.now(),
+            version: '1.0'
+        };
+        
+        // Test write access
+        const testKey = 'test_' + Date.now();
+        localStorage.setItem(testKey, 'test');
+        localStorage.removeItem(testKey);
+        
+        // Save actual settings
+        localStorage.setItem('studySettings', JSON.stringify(settings));
+        showAlert('Settings saved successfully!', 'success');
+        
+    } catch (error) {
+        console.error('Failed to save settings:', error);
+        if (error.name === 'QuotaExceededError') {
+            showAlert('Storage quota exceeded. Please clear some browser data.', 'danger');
+        } else if (error.name === 'SecurityError') {
+            showAlert('Settings cannot be saved in private/incognito mode.', 'warning');
+        } else {
+            showAlert('Failed to save settings: ' + error.message, 'danger');
+        }
+    }
+}
+
+function loadSettings() {
+    try {
+        if (typeof(Storage) === "undefined") {
+            return; // Silently fail if no storage support
+        }
+        
+        const settingsStr = localStorage.getItem('studySettings');
+        if (!settingsStr) {
+            return; // No settings saved yet
+        }
+        
+        const settings = JSON.parse(settingsStr);
+        
+        if (document.getElementById('focusMode')) {
+            document.getElementById('focusMode').checked = settings.focusMode || false;
+        }
+        if (document.getElementById('breakReminder')) {
+            document.getElementById('breakReminder').value = settings.breakReminder || 10;
+        }
+        
+    } catch (error) {
+        console.error('Failed to load settings:', error);
+        // Clear corrupted settings
+        try {
+            localStorage.removeItem('studySettings');
+        } catch (e) {
+            // Ignore cleanup errors
+        }
+    }
+}
+
+// Performance optimizations
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Optimize API calls
+const debouncedStatusUpdate = debounce(function() {
+    updateGameStatus();
+}, 500);
+
+// Improved error handling for showAlert
+function showAlert(message, type = 'info') {
+    try {
+        // Remove any existing alerts first
+        const existingAlerts = document.querySelectorAll('.alert.position-fixed');
+        existingAlerts.forEach(alert => alert.remove());
+        
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+        alertDiv.style.cssText = `
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            max-width: 400px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        `;
+        
+        alertDiv.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        
+        document.body.appendChild(alertDiv);
+        
+        // Auto-dismiss after 5 seconds
+        setTimeout(() => {
+            if (alertDiv.parentNode) {
+                alertDiv.remove();
+            }
+        }, 5000);
+        
+    } catch (error) {
+        console.error('Failed to show alert:', error);
+        // Fallback to browser alert
+        alert(message);
+    }
+}

@@ -120,6 +120,41 @@ class QuizController:
             'streak': self.current_streak,
             'quick_fire_remaining': self._get_quick_fire_remaining() if self.quick_fire_active else None
         }
+    def get_session_status(self):
+        """Get current session status information."""
+        return {
+            'quiz_active': self.quiz_active,
+            'session_score': self.session_score,
+            'session_total': self.session_total,
+            'current_streak': self.current_streak,
+            'mode': self.current_quiz_mode,
+            'questions_since_break': self.questions_since_break
+        }
+
+    def force_end_session(self):
+        """Force end session without validation."""
+        if self.quiz_active:
+            self.quiz_active = False
+            if self.quick_fire_active:
+                self.quick_fire_active = False
+            
+            # Calculate final statistics without leaderboard update to avoid errors
+            accuracy = (self.session_score / self.session_total * 100) if self.session_total > 0 else 0
+            
+            # Save progress
+            self.game_state.save_history()
+            self.game_state.save_achievements()
+            
+            return {
+                'session_score': self.session_score,
+                'session_total': self.session_total,
+                'accuracy': accuracy,
+                'session_points': self.game_state.session_points,
+                'total_points': self.game_state.achievements.get('points_earned', 0),
+                'mode': self.current_quiz_mode,
+                'forced_end': True
+            }
+        return {'error': 'No active session'}
     
     def submit_answer(self, question_data, user_answer_index, original_index):
         """
@@ -230,15 +265,18 @@ class QuizController:
         # Calculate final statistics
         accuracy = (self.session_score / self.session_total * 100) if self.session_total > 0 else 0
         
-        # Update leaderboard
+        # Update leaderboard using StatsController to avoid property issues
         if self.session_total > 0:
-            from controllers.stats_controller import StatsController
-            stats_controller = StatsController(self.game_state)
-            stats_controller.update_leaderboard_entry(
-                self.session_score, 
-                self.session_total, 
-                self.game_state.session_points
-            )
+            try:
+                from controllers.stats_controller import StatsController
+                stats_controller = StatsController(self.game_state)
+                stats_controller.update_leaderboard_entry(
+                    self.session_score, 
+                    self.session_total, 
+                    self.game_state.session_points
+                )
+            except Exception as e:
+                print(f"Warning: Could not update leaderboard: {e}")
         
         # Check for perfect session achievement
         if accuracy == 100 and self.session_total >= 3:

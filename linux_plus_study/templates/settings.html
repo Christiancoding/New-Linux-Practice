@@ -23,16 +23,14 @@
                             <label for="breakReminder" class="form-label">Break Reminder (questions)</label>
                             <input type="number" class="form-control bg-dark text-light" id="breakReminder" value="10" min="1" max="50">
                         </div>
+                        <button class="btn btn-success" onclick="saveSettings()">Save Settings</button>
                     </div>
                     <div class="col-md-6">
                         <h5>Data Management</h5>
-                        <button class="btn btn-outline-info mb-2" onclick="exportHistory()">
+                        <button class="btn btn-outline-info mb-2 d-block" onclick="exportHistory()">
                             <i class="fas fa-download"></i> Export History
                         </button>
-                        <button class="btn btn-outline-warning mb-2" onclick="importHistory()">
-                            <i class="fas fa-upload"></i> Import History  
-                        </button>
-                        <button class="btn btn-outline-danger" onclick="clearHistory()">
+                        <button class="btn btn-outline-danger d-block" onclick="clearHistory()">
                             <i class="fas fa-trash"></i> Clear History
                         </button>
                     </div>
@@ -45,6 +43,60 @@
 
 {% block scripts %}
 <script>
-// Settings functionality will be added to app.js
+// Load settings on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadSettings();
+});
+
+function saveSettings() {
+    const settings = {
+        focusMode: document.getElementById('focusMode').checked,
+        breakReminder: parseInt(document.getElementById('breakReminder').value),
+        timestamp: Date.now()
+    };
+    
+    try {
+        localStorage.setItem('studySettings', JSON.stringify(settings));
+        showAlert('Settings saved successfully!', 'success');
+    } catch (error) {
+        console.error('Failed to save settings:', error);
+        showAlert('Failed to save settings', 'danger');
+    }
+}
+
+function loadSettings() {
+    try {
+        const settings = JSON.parse(localStorage.getItem('studySettings') || '{}');
+        
+        document.getElementById('focusMode').checked = settings.focusMode || false;
+        document.getElementById('breakReminder').value = settings.breakReminder || 10;
+    } catch (error) {
+        console.error('Failed to load settings:', error);
+    }
+}
+
+function exportHistory() {
+    window.location.href = '/api/export_history';
+    showAlert('History export started', 'info');
+}
+
+function clearHistory() {
+    if (confirm('Are you sure you want to clear ALL study history? This action cannot be undone.')) {
+        fetch('/api/clear_statistics', {
+            method: 'POST'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showAlert('Study history cleared successfully', 'success');
+            } else {
+                showAlert('Failed to clear study history: ' + (data.error || 'Unknown error'), 'danger');
+            }
+        })
+        .catch(error => {
+            showAlert('Failed to clear study history', 'danger');
+        });
+    }
+}
 </script>
 {% endblock %}

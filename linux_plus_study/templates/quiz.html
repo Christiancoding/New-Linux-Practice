@@ -53,13 +53,43 @@ let currentQuestion = null;
 let selectedAnswer = null;
 let currentMode = 'standard';
 let quickFireTimer = null;
-let quickFireStartTime = null;
 let isSingleQuestionMode = false;
 
 // Load first question on page load
 document.addEventListener('DOMContentLoaded', function() {
-    loadNextQuestion();
+    checkQuizStatus();
 });
+
+function checkQuizStatus() {
+    fetch('/api/status')
+        .then(response => response.json())
+        .then(data => {
+            if (data.quiz_active) {
+                // Resume existing quiz
+                currentMode = data.quiz_mode || 'standard';
+                loadNextQuestion();
+            } else {
+                // Show start message
+                showStartMessage();
+            }
+        })
+        .catch(error => {
+            console.error('Error checking quiz status:', error);
+            showStartMessage();
+        });
+}
+
+function showStartMessage() {
+    document.getElementById('question-container').innerHTML = `
+        <div class="alert alert-info text-center">
+            <h5>No Active Quiz</h5>
+            <p>Please start a quiz from the <a href="/">home page</a>.</p>
+        </div>
+    `;
+    document.getElementById('options-container').innerHTML = '';
+    document.getElementById('feedback-container').style.display = 'none';
+    document.querySelector('.d-flex.justify-content-between').style.display = 'none';
+}
 
 function loadNextQuestion() {
     fetch('/api/get_question')
@@ -71,11 +101,7 @@ function loadNextQuestion() {
             }
             
             if (data.quiz_complete) {
-                if (data.time_up) {
-                    showQuizComplete(null, 'Time\'s up! Quick Fire challenge ended.');
-                } else {
-                    showQuizComplete();
-                }
+                showQuizComplete();
                 return;
             }
             
@@ -85,7 +111,6 @@ function loadNextQuestion() {
             
             displayQuestion(data);
             updateStatus();
-            updateButtonVisibility();
             
             // Start Quick Fire timer if needed
             if (currentMode === 'quick_fire' && !quickFireTimer) {
@@ -120,6 +145,10 @@ function displayQuestion(data) {
             headerText = '⚡ Mini Quiz';
             categoryText = `${data.category} | Quick Test`;
             break;
+        case 'verify':
+            headerText = '🔍 Verify Knowledge';
+            categoryText = `${data.category} | Assessment Mode`;
+            break;
     }
     
     document.querySelector('.card-header h4').textContent = headerText;
@@ -132,9 +161,6 @@ function displayQuestion(data) {
     
     // Display question counter
     let counterText = `Question ${data.question_number}`;
-    if (data.total_questions) {
-        counterText += ` of ${data.total_questions}`;
-    }
     document.getElementById('question-counter').textContent = counterText;
     
     // Display options
@@ -156,18 +182,8 @@ function displayQuestion(data) {
     document.getElementById('submit-btn').disabled = true;
     document.getElementById('next-btn').style.display = 'none';
     document.getElementById('feedback-container').style.display = 'none';
+    document.querySelector('.d-flex.justify-content-between').style.display = 'flex';
     selectedAnswer = null;
-}
-
-function updateButtonVisibility() {
-    const endButton = document.querySelector('.btn-outline-light');
-    
-    // Hide end quiz button for single question modes
-    if (isSingleQuestionMode) {
-        endButton.style.display = 'none';
-    } else {
-        endButton.style.display = 'inline-block';
-    }
 }
 
 function selectAnswer(index) {
@@ -197,12 +213,12 @@ function submitAnswer() {
         showFeedback(data);
         updateStatus();
         
-        // Handle completion based on mode and quiz_complete flag
-        if (data.quiz_complete || isSingleQuestionMode) {
+        // Handle completion
+        if (data.session_complete || isSingleQuestionMode) {
             clearInterval(quickFireTimer);
             setTimeout(() => {
                 showQuizComplete(data);
-            }, isSingleQuestionMode ? 3000 : 2000); // Longer delay for single questions
+            }, isSingleQuestionMode ? 3000 : 2000);
         }
     })
     .catch(error => {
@@ -216,10 +232,10 @@ function showFeedback(data) {
     let feedbackText = '';
     
     // Handle verify mode differently
-    if (currentMode === 'verify' && !data.show_feedback) {
-        feedbackText = data.feedback_message || 'Answer recorded.';
+    if (currentMode === 'verify') {
+        feedbackText = 'Answer recorded.';
         feedbackClass = 'alert-info';
-    } else if (data.show_feedback !== false) {
+    } else {
         feedbackText = data.is_correct ? 
             '✅ Correct!' : 
             `❌ Incorrect. The correct answer was: ${currentQuestion.options[data.correct_answer_index]}`;
@@ -227,17 +243,13 @@ function showFeedback(data) {
         // Add mode-specific feedback
         if (currentMode === 'quick_fire') {
             feedbackText += data.is_correct ? ' Keep going! 🔥' : ' Keep pushing! ⚡';
-        } else if (currentMode === 'daily_challenge') {
-            feedbackText += data.is_correct ? ' Great job on today\'s challenge! 🌟' : ' Better luck tomorrow! 💪';
-        } else if (currentMode === 'pop_quiz') {
-            feedbackText += data.is_correct ? ' Nice work! 👍' : ' Good try! 💪';
         }
     }
     
     let feedbackHtml = `
         <div class="alert ${feedbackClass}">
             <strong>${feedbackText}</strong>
-            ${data.explanation && data.show_feedback !== false ? `<br><small><strong>Explanation:</strong> ${data.explanation}</small>` : ''}
+            ${data.explanation && currentMode !== 'verify' ? `<br><small><strong>Explanation:</strong> ${data.explanation}</small>` : ''}
             ${data.points_earned ? `<br><small>Points earned: ${data.points_earned}</small>` : ''}
         </div>
     `;
@@ -262,12 +274,8 @@ function showFeedback(data) {
     // Hide submit button after answering
     document.getElementById('submit-btn').style.display = 'none';
     
-    // Handle next button logic
-    if (isSingleQuestionMode || data.quiz_complete) {
-        // Don't show next button for single question modes or when quiz is complete
-        document.getElementById('next-btn').style.display = 'none';
-    } else {
-        // Show next button for multi-question modes that aren't complete
+    // Show next button for multi-question modes
+    if (!isSingleQuestionMode && !data.session_complete) {
         document.getElementById('next-btn').style.display = 'inline-block';
     }
 }
@@ -284,7 +292,11 @@ function endQuiz() {
         })
         .then(response => response.json())
         .then(data => {
-            showQuizResults(data);
+            if (data.success) {
+                showQuizResults(data);
+            } else {
+                showError(data.error || 'Failed to end quiz');
+            }
         })
         .catch(error => {
             console.error('Error ending quiz:', error);
@@ -293,18 +305,18 @@ function endQuiz() {
     }
 }
 
-function showQuizComplete(data = null, customMessage = null) {
+function showQuizComplete(data = null) {
     clearInterval(quickFireTimer);
     
     if (data) {
-        showQuizResults(data, customMessage);
+        showQuizResults(data);
     } else {
         fetch('/api/end_quiz', {
             method: 'POST'
         })
         .then(response => response.json())
         .then(data => {
-            showQuizResults(data, customMessage);
+            showQuizResults(data);
         })
         .catch(error => {
             console.error('Error getting quiz results:', error);
@@ -313,7 +325,7 @@ function showQuizComplete(data = null, customMessage = null) {
     }
 }
 
-function showQuizResults(data, customMessage = null) {
+function showQuizResults(data) {
     let modeTitle = 'Quiz Complete!';
     let modeEmoji = '🎉';
     
@@ -326,40 +338,17 @@ function showQuizResults(data, customMessage = null) {
             modeTitle = 'Daily Challenge Complete!';
             modeEmoji = '🗓️';
             break;
-        case 'pop_quiz':
-            modeTitle = 'Pop Quiz Complete!';
-            modeEmoji = '📊';
-            break;
-        case 'mini_quiz':
-            modeTitle = 'Mini Quiz Complete!';
-            modeEmoji = '⚡';
+        case 'verify':
+            modeTitle = 'Knowledge Verification Complete!';
+            modeEmoji = '🔍';
             break;
     }
     
     let resultsHtml = `
         <div class="alert alert-info text-center">
             <h4>${modeEmoji} ${modeTitle}</h4>
-    `;
-    
-    if (customMessage) {
-        resultsHtml += `<p class="text-warning">${customMessage}</p>`;
-    }
-    
-    resultsHtml += `
             <p>Final Score: ${data.session_score} / ${data.session_total} (${data.accuracy.toFixed(1)}%)</p>
             <p>Points Earned: ${data.session_points}</p>
-    `;
-    
-    // Add mode-specific messages
-    if (currentMode === 'daily_challenge') {
-        resultsHtml += `<p class="text-success">Come back tomorrow for a new challenge!</p>`;
-    } else if (currentMode === 'quick_fire') {
-        resultsHtml += `<p class="text-warning">Great job completing the time challenge!</p>`;
-    } else if (currentMode === 'pop_quiz') {
-        resultsHtml += `<p class="text-info">Thanks for taking the pop quiz!</p>`;
-    }
-    
-    resultsHtml += `
             <button class="btn btn-primary" onclick="window.location.href='/'">Return to Home</button>
         </div>
     `;
@@ -368,24 +357,16 @@ function showQuizResults(data, customMessage = null) {
     document.getElementById('options-container').innerHTML = '';
     document.getElementById('feedback-container').style.display = 'none';
     document.querySelector('.d-flex.justify-content-between').style.display = 'none';
-    
-    // Hide timer if it exists
-    const timerDisplay = document.getElementById('timer-display');
-    if (timerDisplay) {
-        timerDisplay.style.display = 'none';
-    }
 }
 
 function startQuickFireTimer() {
-    // Add timer display to the page
+    // Add timer display
     const headerRow = document.querySelector('.card-header .row');
     const timerCol = document.createElement('div');
     timerCol.className = 'col-auto';
     timerCol.id = 'timer-display';
     timerCol.innerHTML = '<span class="badge bg-danger" id="timer-badge">3:00</span>';
     headerRow.appendChild(timerCol);
-    
-    quickFireStartTime = Date.now();
     
     quickFireTimer = setInterval(() => {
         fetch('/api/quick_fire_status')
@@ -396,7 +377,7 @@ function startQuickFireTimer() {
                     return;
                 }
                 
-                const timeRemaining = Math.max(0, data.time_remaining);
+                const timeRemaining = Math.max(0, data.time_remaining || 0);
                 const minutes = Math.floor(timeRemaining / 60);
                 const seconds = Math.floor(timeRemaining % 60);
                 const timerBadge = document.getElementById('timer-badge');
@@ -404,7 +385,6 @@ function startQuickFireTimer() {
                 if (timerBadge) {
                     timerBadge.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
                     
-                    // Change color based on time remaining
                     if (timeRemaining <= 30) {
                         timerBadge.className = 'badge bg-danger';
                     } else if (timeRemaining <= 60) {
@@ -416,7 +396,7 @@ function startQuickFireTimer() {
                 
                 if (data.should_end) {
                     clearInterval(quickFireTimer);
-                    showQuizComplete(null, data.time_up ? 'Time\'s up!' : null);
+                    showQuizComplete();
                 }
             })
             .catch(error => {

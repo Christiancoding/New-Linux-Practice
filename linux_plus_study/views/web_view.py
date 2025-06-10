@@ -64,74 +64,98 @@ class LinuxPlusStudyWeb:
         
         @self.app.route('/')
         def index():
-            """Main page."""
             return render_template('index.html')
         
         @self.app.route('/quiz')
         def quiz_page():
-            """Quiz interface page."""
             return render_template('quiz.html')
         
         @self.app.route('/stats')
         def stats_page():
-            """Statistics page."""
             return render_template('stats.html')
         
         @self.app.route('/achievements')
         def achievements_page():
-            """Achievements page."""
             return render_template('achievements.html')
         
-        # API Routes
+        @self.app.route('/review')
+        def review_page():
+            return render_template('review.html')
+        
+        @self.app.route('/settings')
+        def settings_page():
+            return render_template('settings.html')
+        
         @self.app.route('/api/status')
         def api_status():
             """Get current game status."""
-            return jsonify({
-                'quiz_active': self.quiz_active,
-                'total_questions': len(self.game_state.questions),
-                'categories': sorted(list(self.game_state.categories)),
-                'session_score': self.game_state.score,
-                'session_total': self.game_state.total_questions_session,
-                'current_streak': self.current_streak,
-                'total_points': self.game_state.achievements.get('points_earned', 0),
-                'session_points': self.game_state.session_points
-            })
+            try:
+                status = self.quiz_controller.get_session_status()
+                return jsonify({
+                    'quiz_active': status['quiz_active'],
+                    'total_questions': len(self.game_state.questions),
+                    'categories': sorted(list(self.game_state.categories)),
+                    'session_score': status['session_score'],
+                    'session_total': status['session_total'],
+                    'current_streak': status['current_streak'],
+                    'total_points': self.game_state.achievements.get('points_earned', 0),
+                    'session_points': self.game_state.session_points,
+                    'quiz_mode': status['mode']
+                })
+            except Exception as e:
+                return jsonify({
+                    'quiz_active': False,
+                    'total_questions': len(self.game_state.questions),
+                    'categories': sorted(list(self.game_state.categories)),
+                    'session_score': 0,
+                    'session_total': 0,
+                    'current_streak': 0,
+                    'total_points': 0,
+                    'session_points': 0,
+                    'quiz_mode': None,
+                    'error': str(e)
+                })
         
         @self.app.route('/api/start_quiz', methods=['POST'])
         def api_start_quiz():
-            data = request.get_json()
-            quiz_mode = data.get('mode', 'standard')
-            category = data.get('category')
-            
             try:
+                data = request.get_json()
+                quiz_mode = data.get('mode', 'standard')
+                category = data.get('category')
+                
+                # Force end any existing session
+                if self.quiz_controller.quiz_active:
+                    self.quiz_controller.force_end_session()
+                
                 result = self.quiz_controller.start_quiz_session(
                     mode=quiz_mode,
                     category_filter=None if category == "All Categories" else category
                 )
                 
-                if result:
-                    self.quiz_active = True
+                if result.get('session_active'):
                     self.current_quiz_mode = quiz_mode
                     self.current_category_filter = result.get('category_filter')
+                    self.current_streak = 0
                     return jsonify({'success': True, **result})
                 else:
                     return jsonify({'success': False, 'error': 'Failed to start quiz session'})
                     
             except Exception as e:
+                print(f"Error starting quiz: {e}")
                 return jsonify({'success': False, 'error': str(e)})
+        
         @self.app.route('/api/get_question')
         def api_get_question():
             try:
                 if not self.quiz_controller.quiz_active:
-                    return jsonify({'quiz_complete': True})
+                    return jsonify({'quiz_complete': True, 'error': 'No active quiz session'})
                     
                 result = self.quiz_controller.get_next_question(self.current_category_filter)
                 
                 if result is None:
-                    self.reset_quiz_state()
                     return jsonify({'quiz_complete': True})
-                    
-                # Store current question info for submit_answer
+                
+                # Store current question info
                 self.current_question_data = result['question_data']
                 self.current_question_index = result['original_index']
                 
@@ -142,17 +166,17 @@ class LinuxPlusStudyWeb:
                     'question': q_text,
                     'options': options,
                     'category': category,
-                    'question_number': result['question_number'],
-                    'total_questions': result.get('total_questions'),
+                    'question_number': result.get('question_number', 1),
                     'streak': result.get('streak', 0),
                     'mode': self.quiz_controller.current_quiz_mode,
                     'is_single_question': self.quiz_controller.current_quiz_mode in ['daily_challenge', 'pop_quiz'],
-                    'quiz_complete': False
+                    'quiz_complete': False,
+                    'quick_fire_remaining': result.get('quick_fire_remaining')
                 })
                 
             except Exception as e:
                 print(f"Error in get_question: {e}")
-                return jsonify({'error': str(e)})
+                return jsonify({'error': str(e), 'quiz_complete': True})
 
         @self.app.route('/api/submit_answer', methods=['POST'])
         def api_submit_answer():
@@ -174,25 +198,9 @@ class LinuxPlusStudyWeb:
                 
                 self.current_streak = result.get('streak', 0)
                 
-                # Handle special mode logic
-                if self.quiz_controller.current_quiz_mode == 'verify':
-                    # For verify mode, don't show feedback immediately
-                    result['show_feedback'] = False
-                    result['feedback_message'] = "Answer recorded."
-                else:
-                    result['show_feedback'] = True
-                    
-                # Update quick fire state if applicable
-                if self.quiz_controller.current_quiz_mode == 'quick_fire':
-                    if result.get('quick_fire_complete') or not self.quiz_controller.quick_fire_active:
-                        result['quiz_complete'] = True
-                        self.reset_quiz_state()
-                
-                # Handle single question modes
-                if (self.quiz_controller.current_quiz_mode in ['daily_challenge', 'pop_quiz'] or 
-                    result.get('session_complete')):
-                    result['quiz_complete'] = True
-                    self.reset_quiz_state()
+                # Clear current question after processing
+                self.current_question_data = None
+                self.current_question_index = -1
                 
                 return jsonify(result)
                 
@@ -204,238 +212,146 @@ class LinuxPlusStudyWeb:
         def api_end_quiz():
             try:
                 if not self.quiz_controller.quiz_active:
-                    return jsonify({'error': 'No active quiz session'})
+                    return jsonify({'success': True, 'message': 'No active quiz session'})
                 
-                result = self.quiz_controller.end_session()
+                result = self.quiz_controller.force_end_session()
                 
                 # Reset web interface state
-                self.reset_quiz_state()
+                self.current_quiz_mode = None
+                self.current_category_filter = None
+                self.current_question_data = None
+                self.current_question_index = -1
+                self.current_streak = 0
                 
-                return jsonify(result)
+                return jsonify({'success': True, **result})
                 
             except Exception as e:
                 print(f"Error in end_quiz: {e}")
-                return jsonify({'error': str(e)})
-        
-        @self.app.route('/api/statistics')
-        def api_statistics():
-            """Get detailed statistics."""
-            from controllers.stats_controller import StatsController
-            stats_controller = StatsController(self.game_state)
-            return jsonify(stats_controller.get_detailed_statistics())
-        
-        @self.app.route('/api/achievements')
-        def api_achievements():
-            """Get achievements data."""
-            from controllers.stats_controller import StatsController
-            stats_controller = StatsController(self.game_state)
-            return jsonify(stats_controller.get_achievements_data())
-        
-        @self.app.route('/api/leaderboard')
-        def api_leaderboard():
-            """Get leaderboard data."""
-            from controllers.stats_controller import StatsController
-            stats_controller = StatsController(self.game_state)
-            return jsonify(stats_controller.get_leaderboard_data())
-        
-        @self.app.route('/api/clear_statistics', methods=['POST'])
-        def api_clear_statistics():
-            """Clear all statistics."""
-            try:
-                from controllers.stats_controller import StatsController
-                stats_controller = StatsController(self.game_state)
-                success = stats_controller.clear_statistics()
-                
-                if success:
-                    return jsonify({'success': True, 'message': 'Statistics cleared'})
-                else:
-                    return jsonify({'success': False, 'error': 'Failed to clear statistics'})
-            except Exception as e:
                 return jsonify({'success': False, 'error': str(e)})
-        @self.app.route('/api/start_quick_fire', methods=['POST'])
-        def api_start_quick_fire():
-            """Start Quick Fire mode."""
-            if self.quiz_active:
-                return jsonify({'error': 'Quiz already active'})
-            
-            # Initialize Quick Fire session
-            self.game_state.score = 0
-            self.game_state.total_questions_session = 0
-            self.game_state.answered_indices_session = []
-            self.game_state.session_points = 0
-            self.current_streak = 0
-            
-            self.quiz_active = True
-            self.current_quiz_mode = "quick_fire"
-            self.current_category_filter = None
-            self.quick_fire_start_time = time.time()
-            self.quick_fire_questions_answered = 0
-            
-            return jsonify({
-                'success': True, 
-                'mode': 'quick_fire',
-                'time_limit': QUICK_FIRE_TIME_LIMIT,
-                'question_limit': QUICK_FIRE_QUESTIONS,
-                'start_time': self.quick_fire_start_time
-            })
-
+        
         @self.app.route('/api/quick_fire_status')
         def api_quick_fire_status():
-            """Get Quick Fire mode status."""
-            if not self.quiz_active or self.current_quiz_mode != "quick_fire":
-                return jsonify({'active': False})
-            
-            elapsed = time.time() - self.quick_fire_start_time
-            time_remaining = max(0, QUICK_FIRE_TIME_LIMIT - elapsed)
-            questions_remaining = max(0, QUICK_FIRE_QUESTIONS - self.quick_fire_questions_answered)
-            
-            # Check if Quick Fire should end
-            time_up = elapsed >= QUICK_FIRE_TIME_LIMIT
-            questions_complete = self.quick_fire_questions_answered >= QUICK_FIRE_QUESTIONS
-            
-            return jsonify({
-                'active': True,
-                'elapsed_time': elapsed,
-                'time_remaining': time_remaining,
-                'questions_answered': self.quick_fire_questions_answered,
-                'questions_remaining': questions_remaining,
-                'time_up': time_up,
-                'questions_complete': questions_complete,
-                'should_end': time_up or questions_complete
-            })
+            try:
+                if self.quiz_controller.quick_fire_active:
+                    result = self.quiz_controller.check_quick_fire_status()
+                    return jsonify(result)
+                else:
+                    return jsonify({'active': False})
+            except Exception as e:
+                return jsonify({'active': False, 'error': str(e)})
+        
+        # Special mode starters - simplified
+        @self.app.route('/api/start_quick_fire', methods=['POST'])
+        def api_start_quick_fire():
+            try:
+                if self.quiz_controller.quiz_active:
+                    self.quiz_controller.force_end_session()
+                
+                result = self.quiz_controller.start_quiz_session(mode="quick_fire")
+                self.current_quiz_mode = "quick_fire"
+                self.current_category_filter = None
+                
+                return jsonify({'success': True, **result})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
 
         @self.app.route('/api/start_daily_challenge', methods=['POST'])
         def api_start_daily_challenge():
-            """Start daily challenge."""
-            if self.quiz_active:
-                return jsonify({'error': 'Quiz already active'})
-            
-            today_iso = datetime.now().date().isoformat()
-            
-            # Check if already completed today
-            if (self.last_daily_challenge_date == today_iso and 
-                self.daily_challenge_completed):
-                return jsonify({'error': 'Daily challenge already completed today'})
-            
-            # Get daily question using date-based seeding
-            date_hash = int(hashlib.md5(today_iso.encode()).hexdigest()[:8], 16)
-            if not self.game_state.questions:
-                return jsonify({'error': 'No questions available'})
-            
-            question_index = date_hash % len(self.game_state.questions)
-            question_data = self.game_state.questions[question_index]
-            
-            # Initialize session
-            self.game_state.score = 0
-            self.game_state.total_questions_session = 0
-            self.game_state.answered_indices_session = []
-            self.game_state.session_points = 0
-            self.current_streak = 0
-            
-            self.quiz_active = True
-            self.current_quiz_mode = "daily_challenge"
-            self.current_category_filter = None
-            self.current_question_data = question_data
-            self.current_question_index = question_index
-            self.last_daily_challenge_date = today_iso
-            
-            q_text, options, correct_idx, category, explanation = question_data
-            
-            return jsonify({
-                'success': True,
-                'mode': 'daily_challenge',
-                'question': q_text,
-                'options': options,
-                'category': category,
-                'date': today_iso
-            })
+            try:
+                if self.quiz_controller.quiz_active:
+                    self.quiz_controller.force_end_session()
+                
+                result = self.quiz_controller.start_quiz_session(mode="daily_challenge")
+                self.current_quiz_mode = "daily_challenge"
+                self.current_category_filter = None
+                
+                return jsonify({'success': True, **result})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
 
         @self.app.route('/api/start_pop_quiz', methods=['POST'])
         def api_start_pop_quiz():
-            """Start pop quiz (single random question)."""
-            if self.quiz_active:
-                return jsonify({'error': 'Quiz already active'})
-            
-            # Get random question
-            question_data, original_index = self.game_state.select_question(None)
-            if question_data is None:
-                return jsonify({'error': 'No questions available'})
-            
-            # Initialize session
-            self.game_state.score = 0
-            self.game_state.total_questions_session = 0
-            self.game_state.answered_indices_session = []
-            self.game_state.session_points = 0
-            self.current_streak = 0
-            
-            self.quiz_active = True
-            self.current_quiz_mode = "pop_quiz"
-            self.current_category_filter = None
-            self.current_question_data = question_data
-            self.current_question_index = original_index
-            
-            q_text, options, correct_idx, category, explanation = question_data
-            
-            return jsonify({
-                'success': True,
-                'mode': 'pop_quiz',
-                'question': q_text,
-                'options': options,
-                'category': category
-            })
+            try:
+                if self.quiz_controller.quiz_active:
+                    self.quiz_controller.force_end_session()
+                
+                result = self.quiz_controller.start_quiz_session(mode="pop_quiz")
+                self.current_quiz_mode = "pop_quiz"
+                self.current_category_filter = None
+                
+                return jsonify({'success': True, **result})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
 
         @self.app.route('/api/start_mini_quiz', methods=['POST'])
         def api_start_mini_quiz():
-            """Start mini quiz (3 questions)."""
-            if self.quiz_active:
-                return jsonify({'error': 'Quiz already active'})
-            
-            # Initialize session
-            self.game_state.score = 0
-            self.game_state.total_questions_session = 0
-            self.game_state.answered_indices_session = []
-            self.game_state.session_points = 0
-            self.current_streak = 0
-            
-            self.quiz_active = True
-            self.current_quiz_mode = "mini_quiz"
-            self.current_category_filter = None
-            
-            return jsonify({
-                'success': True, 
-                'mode': 'mini_quiz',
-                'question_limit': MINI_QUIZ_QUESTIONS
-            })
+            try:
+                if self.quiz_controller.quiz_active:
+                    self.quiz_controller.force_end_session()
+                
+                result = self.quiz_controller.start_quiz_session(mode="mini_quiz")
+                self.current_quiz_mode = "mini_quiz"
+                self.current_category_filter = None
+                
+                return jsonify({'success': True, **result})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
+        
+        # Other API routes remain the same...
+        @self.app.route('/api/statistics')
+        def api_statistics():
+            try:
+                return jsonify(self.stats_controller.get_detailed_statistics())
+            except Exception as e:
+                return jsonify({'error': str(e)})
+        
+        @self.app.route('/api/achievements')
+        def api_achievements():
+            try:
+                return jsonify(self.stats_controller.get_achievements_data())
+            except Exception as e:
+                return jsonify({'error': str(e)})
+        
+        @self.app.route('/api/leaderboard')
+        def api_leaderboard():
+            try:
+                return jsonify(self.stats_controller.get_leaderboard_data())
+            except Exception as e:
+                return jsonify({'error': str(e)})
+        
+        @self.app.route('/api/clear_statistics', methods=['POST'])
+        def api_clear_statistics():
+            try:
+                success = self.stats_controller.clear_statistics()
+                return jsonify({'success': success})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
+        
         @self.app.route('/api/review_incorrect')
         def api_review_incorrect():
-            """Get incorrect questions for review."""
-            from controllers.stats_controller import StatsController
-            stats_controller = StatsController(self.game_state)
-            return jsonify(stats_controller.get_review_questions_data())
+            try:
+                return jsonify(self.stats_controller.get_review_questions_data())
+            except Exception as e:
+                return jsonify({'error': str(e)})
 
         @self.app.route('/api/remove_from_review', methods=['POST'])
         def api_remove_from_review():
-            """Remove question from review list."""
-            data = request.get_json()
-            question_text = data.get('question_text')
-            if not question_text:
-                return jsonify({'success': False, 'error': 'No question text provided'})
-            
-            from controllers.stats_controller import StatsController
-            stats_controller = StatsController(self.game_state)
-            success = stats_controller.remove_from_review_list(question_text)
-            
-            return jsonify({'success': success})
+            try:
+                data = request.get_json()
+                question_text = data.get('question_text')
+                if not question_text:
+                    return jsonify({'success': False, 'error': 'No question text provided'})
+                
+                success = self.stats_controller.remove_from_review_list(question_text)
+                return jsonify({'success': success})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
 
         @self.app.route('/api/export_history')
         def api_export_history():
-            """Export study history as JSON download."""
-            from flask import make_response
-            import json
-            from datetime import datetime
-            
             try:
-                # Create export data
+                from flask import make_response
+                
                 export_data = self.game_state.study_history.copy()
                 export_data["export_metadata"] = {
                     "export_date": datetime.now().isoformat(),
@@ -443,7 +359,6 @@ class LinuxPlusStudyWeb:
                     "categories_available": list(self.game_state.categories)
                 }
                 
-                # Create response
                 response = make_response(json.dumps(export_data, indent=2))
                 response.headers['Content-Type'] = 'application/json'
                 response.headers['Content-Disposition'] = f'attachment; filename=linux_plus_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
@@ -451,10 +366,7 @@ class LinuxPlusStudyWeb:
                 return response
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
-        @self.app.route('/review')
-        def review_page():
-            """Review incorrect answers page."""
-            return render_template('review.html')
+        
         @self.app.errorhandler(404)
         def not_found_error(error):
             return render_template('error.html', error="Page not found"), 404
@@ -462,10 +374,6 @@ class LinuxPlusStudyWeb:
         @self.app.errorhandler(500)
         def internal_error(error):
             return render_template('error.html', error="Internal server error"), 500
-        @self.app.route('/settings')
-        def settings_page():
-            """Settings page."""
-            return render_template('settings.html')
     def handle_api_errors(f):
         def wrapper(*args, **kwargs):
             try:
