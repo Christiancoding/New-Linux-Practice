@@ -68,3 +68,59 @@ body {
         font-size: 0.9rem;
     }
 }
+/* Fix bottom bar overlap */
+.container-fluid {
+    padding-bottom: 80px; /* Add space for fixed bottom bar */
+}
+
+.fixed-bottom {
+    background: rgba(108, 117, 125, 0.95) !important;
+    backdrop-filter: blur(5px);
+    z-index: 1030;
+}
+
+/* Improve performance */
+* {
+    box-sizing: border-box;
+}
+
+.card {
+    will-change: transform;
+    transform: translateZ(0);
+}
+
+/* Better responsive layout */
+@media (max-width: 768px) {
+    .container-fluid {
+        padding-bottom: 100px; /* More space on mobile */
+    }
+    
+    .fixed-bottom .row {
+        font-size: 0.8rem;
+    }
+    
+    .card-body {
+        padding: 1rem;
+    }
+}
+
+/* Improve form performance */
+.form-check {
+    contain: layout style;
+}
+
+/* Optimize animations */
+.fade-in {
+    animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+    from { 
+        opacity: 0; 
+        transform: translateY(10px); 
+    }
+    to { 
+        opacity: 1; 
+        transform: translateY(0); 
+    }
+}

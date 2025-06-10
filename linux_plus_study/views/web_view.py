@@ -49,7 +49,16 @@ class LinuxPlusStudyWeb:
         self.daily_challenge_completed = False
         
         self.setup_routes()
-    
+    def reset_quiz_state(self):
+        """Reset quiz state variables."""
+        self.quiz_active = False
+        self.current_quiz_mode = None
+        self.current_category_filter = None
+        self.current_question_data = None
+        self.current_question_index = -1
+        self.current_streak = 0
+        self.quick_fire_start_time = None
+        self.quick_fire_questions_answered = 0
     def setup_routes(self):
         """Setup Flask routes for the web interface."""
         
@@ -119,6 +128,7 @@ class LinuxPlusStudyWeb:
                 result = self.quiz_controller.get_next_question(self.current_category_filter)
                 
                 if result is None:
+                    self.reset_quiz_state()
                     return jsonify({'quiz_complete': True})
                     
                 # Store current question info for submit_answer
@@ -133,12 +143,15 @@ class LinuxPlusStudyWeb:
                     'options': options,
                     'category': category,
                     'question_number': result['question_number'],
+                    'total_questions': result.get('total_questions'),
                     'streak': result.get('streak', 0),
                     'mode': self.quiz_controller.current_quiz_mode,
-                    'is_single_question': self.quiz_controller.current_quiz_mode in ['daily_challenge', 'pop_quiz']
+                    'is_single_question': self.quiz_controller.current_quiz_mode in ['daily_challenge', 'pop_quiz'],
+                    'quiz_complete': False
                 })
                 
             except Exception as e:
+                print(f"Error in get_question: {e}")
                 return jsonify({'error': str(e)})
 
         @self.app.route('/api/submit_answer', methods=['POST'])
@@ -161,9 +174,30 @@ class LinuxPlusStudyWeb:
                 
                 self.current_streak = result.get('streak', 0)
                 
+                # Handle special mode logic
+                if self.quiz_controller.current_quiz_mode == 'verify':
+                    # For verify mode, don't show feedback immediately
+                    result['show_feedback'] = False
+                    result['feedback_message'] = "Answer recorded."
+                else:
+                    result['show_feedback'] = True
+                    
+                # Update quick fire state if applicable
+                if self.quiz_controller.current_quiz_mode == 'quick_fire':
+                    if result.get('quick_fire_complete') or not self.quiz_controller.quick_fire_active:
+                        result['quiz_complete'] = True
+                        self.reset_quiz_state()
+                
+                # Handle single question modes
+                if (self.quiz_controller.current_quiz_mode in ['daily_challenge', 'pop_quiz'] or 
+                    result.get('session_complete')):
+                    result['quiz_complete'] = True
+                    self.reset_quiz_state()
+                
                 return jsonify(result)
                 
             except Exception as e:
+                print(f"Error in submit_answer: {e}")
                 return jsonify({'error': str(e)})
         
         @self.app.route('/api/end_quiz', methods=['POST'])
@@ -175,16 +209,12 @@ class LinuxPlusStudyWeb:
                 result = self.quiz_controller.end_session()
                 
                 # Reset web interface state
-                self.quiz_active = False
-                self.current_quiz_mode = None
-                self.current_category_filter = None
-                self.current_question_data = None
-                self.current_question_index = -1
-                self.current_streak = 0
+                self.reset_quiz_state()
                 
                 return jsonify(result)
                 
             except Exception as e:
+                print(f"Error in end_quiz: {e}")
                 return jsonify({'error': str(e)})
         
         @self.app.route('/api/statistics')

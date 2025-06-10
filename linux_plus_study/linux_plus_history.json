@@ -69,7 +69,7 @@
     },
     "What is the purpose of the `grub2-mkconfig` command?": {
       "correct": 0,
-      "attempts": 4,
+      "attempts": 5,
       "history": [
         {
           "timestamp": "2025-06-06T11:15:26.279818",
@@ -85,6 +85,10 @@
         },
         {
           "timestamp": "2025-06-09T22:41:45.761195",
+          "correct": false
+        },
+        {
+          "timestamp": "2025-06-10T02:21:12.368501",
           "correct": false
         }
       ]
@@ -162,12 +166,22 @@
           "correct": false
         }
       ]
+    },
+    "A system administrator needs to obtain information about which server versions are running on open ports of a remote host. However, the administrator must avoid performing an intrusive scan that could disrupt network services. Which of the following commands should the administrator run to best meet these requirements?": {
+      "correct": 1,
+      "attempts": 1,
+      "history": [
+        {
+          "timestamp": "2025-06-10T02:21:25.451175",
+          "correct": true
+        }
+      ]
     }
   },
   "categories": {
     "Commands (System Management)": {
       "correct": 2,
-      "attempts": 17
+      "attempts": 18
     },
     "Concepts & Terms (Containers)": {
       "correct": 0,
@@ -186,12 +200,12 @@
       "attempts": 4
     },
     "Troubleshooting": {
-      "correct": 1,
-      "attempts": 2
+      "correct": 2,
+      "attempts": 3
     }
   },
-  "total_correct": 7,
-  "total_attempts": 27,
+  "total_correct": 8,
+  "total_attempts": 29,
   "incorrect_review": [
     "What is the purpose of the `grub2-mkconfig` command?",
     "Which command is typically used on Debian-based systems to update the GRUB2 configuration file?",
@@ -203,6 +217,13 @@
   "leaderboard": [
     {
       "date": "2025-06-09T22:30:50.425900",
+      "score": 1,
+      "total": 1,
+      "accuracy": 100.0,
+      "points": 10
+    },
+    {
+      "date": "2025-06-10T02:21:32.313677",
       "score": 1,
       "total": 1,
       "accuracy": 100.0,
@@ -231,6 +252,13 @@
     },
     {
       "date": "2025-06-10T00:28:12.681070",
+      "score": 0,
+      "total": 1,
+      "accuracy": 0.0,
+      "points": -2
+    },
+    {
+      "date": "2025-06-10T02:21:19.495070",
       "score": 0,
       "total": 1,
       "accuracy": 0.0,

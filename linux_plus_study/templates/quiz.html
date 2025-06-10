@@ -213,23 +213,31 @@ function submitAnswer() {
 
 function showFeedback(data) {
     let feedbackClass = data.is_correct ? 'alert-success' : 'alert-danger';
-    let feedbackText = data.is_correct ? 
-        '✅ Correct!' : 
-        `❌ Incorrect. The correct answer was: ${currentQuestion.options[data.correct_answer_index]}`;
+    let feedbackText = '';
     
-    // Add mode-specific feedback
-    if (currentMode === 'quick_fire') {
-        feedbackText += data.is_correct ? ' Keep going! 🔥' : ' Keep pushing! ⚡';
-    } else if (currentMode === 'daily_challenge') {
-        feedbackText += data.is_correct ? ' Great job on today\'s challenge! 🌟' : ' Better luck tomorrow! 💪';
-    } else if (currentMode === 'pop_quiz') {
-        feedbackText += data.is_correct ? ' Nice work! 👍' : ' Good try! 💪';
+    // Handle verify mode differently
+    if (currentMode === 'verify' && !data.show_feedback) {
+        feedbackText = data.feedback_message || 'Answer recorded.';
+        feedbackClass = 'alert-info';
+    } else if (data.show_feedback !== false) {
+        feedbackText = data.is_correct ? 
+            '✅ Correct!' : 
+            `❌ Incorrect. The correct answer was: ${currentQuestion.options[data.correct_answer_index]}`;
+        
+        // Add mode-specific feedback
+        if (currentMode === 'quick_fire') {
+            feedbackText += data.is_correct ? ' Keep going! 🔥' : ' Keep pushing! ⚡';
+        } else if (currentMode === 'daily_challenge') {
+            feedbackText += data.is_correct ? ' Great job on today\'s challenge! 🌟' : ' Better luck tomorrow! 💪';
+        } else if (currentMode === 'pop_quiz') {
+            feedbackText += data.is_correct ? ' Nice work! 👍' : ' Good try! 💪';
+        }
     }
     
     let feedbackHtml = `
         <div class="alert ${feedbackClass}">
             <strong>${feedbackText}</strong>
-            ${data.explanation ? `<br><small><strong>Explanation:</strong> ${data.explanation}</small>` : ''}
+            ${data.explanation && data.show_feedback !== false ? `<br><small><strong>Explanation:</strong> ${data.explanation}</small>` : ''}
             ${data.points_earned ? `<br><small>Points earned: ${data.points_earned}</small>` : ''}
         </div>
     `;

@@ -180,3 +180,66 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('focusMode')?.addEventListener('change', saveSettings);
     document.getElementById('breakReminder')?.addEventListener('change', saveSettings);
 });
+// Settings management (fixed version)
+function saveSettings() {
+    const settings = {
+        focusMode: document.getElementById('focusMode')?.checked || false,
+        breakReminder: parseInt(document.getElementById('breakReminder')?.value) || 10,
+        timestamp: Date.now()
+    };
+    
+    try {
+        localStorage.setItem('studySettings', JSON.stringify(settings));
+        showAlert('Settings saved successfully!', 'success');
+    } catch (error) {
+        console.error('Failed to save settings:', error);
+        showAlert('Failed to save settings', 'danger');
+    }
+}
+
+function loadSettings() {
+    try {
+        const settings = JSON.parse(localStorage.getItem('studySettings') || '{}');
+        
+        if (document.getElementById('focusMode')) {
+            document.getElementById('focusMode').checked = settings.focusMode || false;
+        }
+        if (document.getElementById('breakReminder')) {
+            document.getElementById('breakReminder').value = settings.breakReminder || 10;
+        }
+    } catch (error) {
+        console.error('Failed to load settings:', error);
+    }
+}
+
+// Auto-save settings when changed
+document.addEventListener('DOMContentLoaded', function() {
+    loadSettings();
+    
+    // Add event listeners for auto-save
+    const focusModeEl = document.getElementById('focusMode');
+    const breakReminderEl = document.getElementById('breakReminder');
+    
+    if (focusModeEl) {
+        focusModeEl.addEventListener('change', saveSettings);
+    }
+    if (breakReminderEl) {
+        breakReminderEl.addEventListener('change', saveSettings);
+    }
+});
+
+// Performance improvements
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Debounced status updates
+const debouncedUpdateStatus = debounce(updateStatus, 250);
