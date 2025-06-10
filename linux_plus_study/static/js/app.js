@@ -128,3 +128,55 @@ document.getElementById('searchInput').addEventListener('input', function() {
         }
     });
 });
+// ADD these functions to handle missing web functionality:
+
+// Settings management
+function saveSettings() {
+    const settings = {
+        focusMode: document.getElementById('focusMode')?.checked || false,
+        breakReminder: document.getElementById('breakReminder')?.value || 10
+    };
+    localStorage.setItem('studySettings', JSON.stringify(settings));
+    showAlert('Settings saved', 'success');
+}
+
+function loadSettings() {
+    const settings = JSON.parse(localStorage.getItem('studySettings') || '{}');
+    if (document.getElementById('focusMode')) {
+        document.getElementById('focusMode').checked = settings.focusMode || false;
+    }
+    if (document.getElementById('breakReminder')) {
+        document.getElementById('breakReminder').value = settings.breakReminder || 10;
+    }
+}
+
+// Enhanced navigation
+function updateActiveNavigation() {
+    const currentPath = window.location.pathname;
+    document.querySelectorAll('.nav-link').forEach(link => {
+        link.classList.remove('active');
+        if (link.getAttribute('href') === currentPath) {
+            link.classList.add('active');
+        }
+    });
+}
+
+// Auto-save quiz progress
+function autoSaveQuizProgress() {
+    // Implement auto-save functionality for web
+    const quizState = {
+        mode: currentMode,
+        timestamp: Date.now()
+    };
+    sessionStorage.setItem('quizProgress', JSON.stringify(quizState));
+}
+
+// ADD to DOMContentLoaded:
+document.addEventListener('DOMContentLoaded', function() {
+    updateActiveNavigation();
+    loadSettings();
+    
+    // Auto-save settings when changed
+    document.getElementById('focusMode')?.addEventListener('change', saveSettings);
+    document.getElementById('breakReminder')?.addEventListener('change', saveSettings);
+});

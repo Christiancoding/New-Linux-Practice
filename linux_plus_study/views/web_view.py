@@ -12,6 +12,9 @@ import os
 import json
 from datetime import datetime
 import hashlib
+import time
+import logging
+import traceback
 from utils.config import (
     QUICK_FIRE_QUESTIONS, QUICK_FIRE_TIME_LIMIT, MINI_QUIZ_QUESTIONS,
     POINTS_PER_CORRECT, POINTS_PER_INCORRECT, STREAK_BONUS_THRESHOLD, STREAK_BONUS_MULTIPLIER
@@ -29,17 +32,16 @@ class LinuxPlusStudyWeb:
         self.debug = debug
         self.window = None
         
-        # Current session state
-        self.current_question_data = None
-        self.current_question_index = -1
-        self.quiz_active = False
-        self.current_category_filter = None
-        self.current_quiz_mode = "standard"
-        self.current_streak = 0
-        self.quick_fire_start_time = None
-        self.quick_fire_questions_answered = 0
-        self.daily_challenge_completed = False
-        self.last_daily_challenge_date = None
+        self.game_state = game_state
+        self.app = Flask(__name__, ...)
+        self.debug = debug
+        self.window = None
+
+        from controllers.quiz_controller import QuizController
+        from controllers.stats_controller import StatsController
+        
+        self.quiz_controller = QuizController(game_state)
+        self.stats_controller = StatsController(game_state)
         
         self.setup_routes()
     
@@ -83,189 +85,40 @@ class LinuxPlusStudyWeb:
         
         @self.app.route('/api/start_quiz', methods=['POST'])
         def api_start_quiz():
-            """Start a new quiz session."""
             data = request.get_json()
             quiz_mode = data.get('mode', 'standard')
             category = data.get('category')
             
-            # Reset session
-            self.game_state.score = 0
-            self.game_state.total_questions_session = 0
-            self.game_state.answered_indices_session = []
-            self.game_state.session_points = 0
-            self.current_streak = 0
+            result = self.quiz_controller.start_quiz_session(
+                mode=quiz_mode,
+                category_filter=None if category == "All Categories" else category
+            )
             
-            self.quiz_active = True
-            self.current_quiz_mode = quiz_mode
-            self.current_category_filter = None if category == "All Categories" else category
-            
-            return jsonify({'success': True, 'message': 'Quiz started'})
+            return jsonify(result)
         @self.app.route('/api/get_question')
         def api_get_question():
-            """Get the next question."""
-            if not self.quiz_active:
-                return jsonify({'error': 'No active quiz session'})
-            
-            # Handle single-question modes (daily challenge and pop quiz)
-            if self.current_quiz_mode in ["daily_challenge", "pop_quiz"]:
-                # These modes should only have one question
-                if self.game_state.total_questions_session > 0:
-                    # Already answered the question, quiz is complete
-                    self.quiz_active = False
-                    return jsonify({'quiz_complete': True})
-                
-                if self.current_question_data is None:
-                    return jsonify({'error': 'No question available for this mode'})
-                
-                q_text, options, correct_idx, category, explanation = self.current_question_data
-                return jsonify({
-                    'question': q_text,
-                    'options': options,
-                    'category': category,
-                    'question_number': 1,
-                    'total_questions': 1,
-                    'current_streak': self.current_streak,
-                    'mode': self.current_quiz_mode,
-                    'is_single_question': True
-                })
-            
-            # Handle Quick Fire time check
-            if self.current_quiz_mode == "quick_fire":
-                elapsed = time.time() - self.quick_fire_start_time
-                if elapsed >= QUICK_FIRE_TIME_LIMIT or self.quick_fire_questions_answered >= QUICK_FIRE_QUESTIONS:
-                    self.quiz_active = False
-                    return jsonify({'quiz_complete': True, 'time_up': elapsed >= QUICK_FIRE_TIME_LIMIT})
-            
-            # Handle Mini Quiz limit
-            if self.current_quiz_mode == "mini_quiz" and self.game_state.total_questions_session >= MINI_QUIZ_QUESTIONS:
-                self.quiz_active = False
+            result = self.quiz_controller.get_next_question()
+            if result is None:
                 return jsonify({'quiz_complete': True})
-            
-            # Get next question for standard and multi-question modes
-            question_data, original_index = self.game_state.select_question(self.current_category_filter)
-            
-            if question_data is None:
-                self.quiz_active = False
-                return jsonify({'quiz_complete': True})
-            
-            self.current_question_data = question_data
-            self.current_question_index = original_index
-            
-            q_text, options, correct_idx, category, explanation = question_data
-            
-            # Calculate total questions for display
-            total_questions = len(self.game_state.questions)
-            if self.current_quiz_mode == "quick_fire":
-                total_questions = QUICK_FIRE_QUESTIONS
-            elif self.current_quiz_mode == "mini_quiz":
-                total_questions = MINI_QUIZ_QUESTIONS
-            
-            return jsonify({
-                'question': q_text,
-                'options': options,
-                'category': category,
-                'question_number': self.game_state.total_questions_session + 1,
-                'total_questions': total_questions,
-                'current_streak': self.current_streak,
-                'mode': self.current_quiz_mode,
-                'is_single_question': False
-            })
-        
+            return jsonify(result)
+
         @self.app.route('/api/submit_answer', methods=['POST'])
         def api_submit_answer():
-            """Submit an answer."""
-            if not self.quiz_active or not self.current_question_data:
-                return jsonify({'error': 'No active question'})
-            
             data = request.get_json()
             user_answer_index = data.get('answer_index')
             
-            if user_answer_index is None:
-                return jsonify({'error': 'No answer provided'})
+            if not self.quiz_controller.quiz_active:
+                return jsonify({'error': 'No active quiz session'})
             
-            q_text, options, correct_idx, category, explanation = self.current_question_data
-            is_correct = (user_answer_index == correct_idx)
+            # Get current question from controller
+            question_data = self.quiz_controller.current_question_data
+            original_index = self.quiz_controller.current_question_index
             
-            # Update streak
-            if is_correct:
-                self.current_streak += 1
-                self.game_state.score += 1
-            else:
-                self.current_streak = 0
+            result = self.quiz_controller.submit_answer(
+                question_data, user_answer_index, original_index
+            )
             
-            # Update session counters
-            self.game_state.total_questions_session += 1
-            
-            # Update Quick Fire counter
-            if self.current_quiz_mode == "quick_fire":
-                self.quick_fire_questions_answered += 1
-            
-            # Calculate points
-            points_earned = POINTS_PER_CORRECT if is_correct else POINTS_PER_INCORRECT
-            if is_correct and self.current_streak >= STREAK_BONUS_THRESHOLD:
-                points_earned = int(points_earned * STREAK_BONUS_MULTIPLIER)
-            
-            self.game_state.update_points(points_earned)
-            
-            # Update history
-            if 0 <= self.current_question_index < len(self.game_state.questions):
-                original_question_text = self.game_state.questions[self.current_question_index][0]
-                self.game_state.update_history(original_question_text, category, is_correct)
-            
-            # Check achievements
-            new_badges = self.game_state.check_achievements(is_correct, self.current_streak)
-            
-            # Handle special mode completions
-            special_achievements = []
-            quiz_complete = False
-            
-            if self.current_quiz_mode == "daily_challenge":
-                self.daily_challenge_completed = True
-                if is_correct:
-                    # Award daily warrior achievement
-                    if "daily_warrior" not in self.game_state.achievements["badges"]:
-                        self.game_state.achievements["badges"].append("daily_warrior")
-                        special_achievements.append("daily_warrior")
-                quiz_complete = True
-                self.quiz_active = False
-            
-            elif self.current_quiz_mode == "pop_quiz":
-                quiz_complete = True
-                self.quiz_active = False
-            
-            elif self.current_quiz_mode == "quick_fire":
-                if self.quick_fire_questions_answered >= QUICK_FIRE_QUESTIONS:
-                    # Award Quick Fire achievement
-                    if "quick_fire_champion" not in self.game_state.achievements["badges"]:
-                        self.game_state.achievements["badges"].append("quick_fire_champion")
-                        special_achievements.append("quick_fire_champion")
-                    quiz_complete = True
-                    self.quiz_active = False
-            
-            elif self.current_quiz_mode == "mini_quiz":
-                if self.game_state.total_questions_session >= MINI_QUIZ_QUESTIONS:
-                    quiz_complete = True
-                    self.quiz_active = False
-            
-            # Save progress
-            self.game_state.save_history()
-            self.game_state.save_achievements()
-            
-            # Combine all new badges
-            all_new_badges = new_badges + special_achievements
-            
-            return jsonify({
-                'is_correct': is_correct,
-                'correct_answer_index': correct_idx,
-                'explanation': explanation,
-                'points_earned': points_earned,
-                'current_streak': self.current_streak,
-                'new_badges': [self.game_state.get_achievement_description(badge) for badge in all_new_badges],
-                'session_score': self.game_state.score,
-                'session_total': self.game_state.total_questions_session,
-                'quiz_complete': quiz_complete,
-                'mode': self.current_quiz_mode
-            })
+            return jsonify(result)
         
         @self.app.route('/api/end_quiz', methods=['POST'])
         def api_end_quiz():
@@ -546,6 +399,23 @@ class LinuxPlusStudyWeb:
         @self.app.errorhandler(500)
         def internal_error(error):
             return render_template('error.html', error="Internal server error"), 500
+        @self.app.route('/settings')
+        def settings_page():
+            """Settings page."""
+            return render_template('settings.html')
+    def handle_api_errors(f):
+        def wrapper(*args, **kwargs):
+            try:
+                return f(*args, **kwargs)
+            except Exception as e:
+                logging.error(f"API Error in {f.__name__}: {str(e)}")
+                logging.error(traceback.format_exc())
+                return jsonify({
+                    'error': f'Server error: {str(e)}',
+                    'success': False
+                }), 500
+        wrapper.__name__ = f.__name__
+        return wrapper
     
     def run_flask_app(self):
         """Run the Flask app in a separate thread."""
