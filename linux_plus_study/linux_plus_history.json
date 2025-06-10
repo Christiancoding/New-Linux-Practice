@@ -1,0 +1,247 @@
+{
+  "sessions": [],
+  "questions": {
+    "Which command installs the GRUB2 bootloader to a specified device?": {
+      "correct": 2,
+      "attempts": 8,
+      "history": [
+        {
+          "timestamp": "2025-06-05T22:45:14.387936",
+          "correct": false
+        },
+        {
+          "timestamp": "2025-06-05T23:04:10.637830",
+          "correct": false
+        },
+        {
+          "timestamp": "2025-06-06T08:46:00.197739",
+          "correct": false
+        },
+        {
+          "timestamp": "2025-06-06T11:15:23.062020",
+          "correct": true
+        },
+        {
+          "timestamp": "2025-06-06T15:10:05.754011",
+          "correct": false
+        },
+        {
+          "timestamp": "2025-06-06T15:20:53.298572",
+          "correct": true
+        },
+        {
+          "timestamp": "2025-06-09T22:47:32.391461",
+          "correct": false
+        },
+        {
+          "timestamp": "2025-06-09T23:01:04.754792",
+          "correct": false
+        }
+      ]
+    },
+    "What is AppArmor?": {
+      "correct": 1,
+      "attempts": 1,
+      "history": [
+        {
+          "timestamp": "2025-06-06T11:14:58.942035",
+          "correct": true
+        }
+      ]
+    },
+    "What is an AppImage?": {
+      "correct": 1,
+      "attempts": 3,
+      "history": [
+        {
+          "timestamp": "2025-06-06T11:15:16.041994",
+          "correct": true
+        },
+        {
+          "timestamp": "2025-06-09T22:59:23.387173",
+          "correct": false
+        },
+        {
+          "timestamp": "2025-06-10T00:28:23.184186",
+          "correct": false
+        }
+      ]
+    },
+    "What is the purpose of the `grub2-mkconfig` command?": {
+      "correct": 0,
+      "attempts": 4,
+      "history": [
+        {
+          "timestamp": "2025-06-06T11:15:26.279818",
+          "correct": false
+        },
+        {
+          "timestamp": "2025-06-06T15:09:59.199140",
+          "correct": false
+        },
+        {
+          "timestamp": "2025-06-09T12:59:50.901367",
+          "correct": false
+        },
+        {
+          "timestamp": "2025-06-09T22:41:45.761195",
+          "correct": false
+        }
+      ]
+    },
+    "What does ACL stand for in Linux security?": {
+      "correct": 2,
+      "attempts": 3,
+      "history": [
+        {
+          "timestamp": "2025-06-06T13:33:23.821291",
+          "correct": true
+        },
+        {
+          "timestamp": "2025-06-06T13:34:29.454181",
+          "correct": false
+        },
+        {
+          "timestamp": "2025-06-09T22:59:55.808510",
+          "correct": true
+        }
+      ]
+    },
+    "Which command is typically used on Debian-based systems to update the GRUB2 configuration file?": {
+      "correct": 0,
+      "attempts": 3,
+      "history": [
+        {
+          "timestamp": "2025-06-06T15:08:23.469017",
+          "correct": false
+        },
+        {
+          "timestamp": "2025-06-06T15:10:02.042004",
+          "correct": false
+        },
+        {
+          "timestamp": "2025-06-10T00:27:58.500362",
+          "correct": false
+        }
+      ]
+    },
+    "What is the primary function of the `mkinitrd` command?": {
+      "correct": 0,
+      "attempts": 2,
+      "history": [
+        {
+          "timestamp": "2025-06-06T15:09:55.321148",
+          "correct": false
+        },
+        {
+          "timestamp": "2025-06-09T22:47:57.427386",
+          "correct": false
+        }
+      ]
+    },
+    "A system administrator notices that a production server is experiencing significant slowdowns. Upon further investigation using the top command, it's observed that the I/O wait percentage is consistently above 30%. Considering that the server's disk activity is not excessively high, what could be a probable cause for the high I/O wait?": {
+      "correct": 1,
+      "attempts": 2,
+      "history": [
+        {
+          "timestamp": "2025-06-09T21:11:51.536114",
+          "correct": false
+        },
+        {
+          "timestamp": "2025-06-09T22:30:31.054820",
+          "correct": true
+        }
+      ]
+    },
+    "In Kubernetes, what is an Ambassador container?": {
+      "correct": 0,
+      "attempts": 1,
+      "history": [
+        {
+          "timestamp": "2025-06-09T23:01:18.920785",
+          "correct": false
+        }
+      ]
+    }
+  },
+  "categories": {
+    "Commands (System Management)": {
+      "correct": 2,
+      "attempts": 17
+    },
+    "Concepts & Terms (Containers)": {
+      "correct": 0,
+      "attempts": 1
+    },
+    "Concepts & Terms (Automation)": {
+      "correct": 0,
+      "attempts": 0
+    },
+    "Concepts & Terms (System Management)": {
+      "correct": 1,
+      "attempts": 3
+    },
+    "Concepts & Terms (Security)": {
+      "correct": 3,
+      "attempts": 4
+    },
+    "Troubleshooting": {
+      "correct": 1,
+      "attempts": 2
+    }
+  },
+  "total_correct": 7,
+  "total_attempts": 27,
+  "incorrect_review": [
+    "What is the purpose of the `grub2-mkconfig` command?",
+    "Which command is typically used on Debian-based systems to update the GRUB2 configuration file?",
+    "What is the primary function of the `mkinitrd` command?",
+    "Which command installs the GRUB2 bootloader to a specified device?",
+    "What is an AppImage?",
+    "In Kubernetes, what is an Ambassador container?"
+  ],
+  "leaderboard": [
+    {
+      "date": "2025-06-09T22:30:50.425900",
+      "score": 1,
+      "total": 1,
+      "accuracy": 100.0,
+      "points": 10
+    },
+    {
+      "date": "2025-06-09T21:12:06.913312",
+      "score": 0,
+      "total": 1,
+      "accuracy": 0.0,
+      "points": -2
+    },
+    {
+      "date": "2025-06-09T22:47:43.166173",
+      "score": 0,
+      "total": 1,
+      "accuracy": 0.0,
+      "points": -2
+    },
+    {
+      "date": "2025-06-09T23:01:22.269187",
+      "score": 0,
+      "total": 1,
+      "accuracy": 0.0,
+      "points": -2
+    },
+    {
+      "date": "2025-06-10T00:28:12.681070",
+      "score": 0,
+      "total": 1,
+      "accuracy": 0.0,
+      "points": -2
+    },
+    {
+      "date": "2025-06-06T15:10:06.258388",
+      "score": 0,
+      "total": 4,
+      "accuracy": 0.0,
+      "points": -8
+    }
+  ]
+}

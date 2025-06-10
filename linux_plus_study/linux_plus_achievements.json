@@ -1,0 +1,60 @@
+{
+  "badges": [
+    "dedicated_learner"
+  ],
+  "points_earned": 65,
+  "days_studied": [
+    "2025-06-10",
+    "2025-06-09",
+    "2025-06-06",
+    "2025-06-05"
+  ],
+  "questions_answered": 1,
+  "streaks_achieved": 0,
+  "perfect_sessions": 0,
+  "daily_warrior_dates": [],
+  "leaderboard": [
+    {
+      "date": "2025-06-09T22:30:50.425900",
+      "score": 1,
+      "total": 1,
+      "accuracy": 100.0,
+      "points": 10
+    },
+    {
+      "date": "2025-06-09T21:12:06.913312",
+      "score": 0,
+      "total": 1,
+      "accuracy": 0.0,
+      "points": -2
+    },
+    {
+      "date": "2025-06-09T22:47:43.166173",
+      "score": 0,
+      "total": 1,
+      "accuracy": 0.0,
+      "points": -2
+    },
+    {
+      "date": "2025-06-09T23:01:22.269187",
+      "score": 0,
+      "total": 1,
+      "accuracy": 0.0,
+      "points": -2
+    },
+    {
+      "date": "2025-06-10T00:28:12.681070",
+      "score": 0,
+      "total": 1,
+      "accuracy": 0.0,
+      "points": -2
+    },
+    {
+      "date": "2025-06-06T15:10:06.258388",
+      "score": 0,
+      "total": 4,
+      "accuracy": 0.0,
+      "points": -8
+    }
+  ]
+}

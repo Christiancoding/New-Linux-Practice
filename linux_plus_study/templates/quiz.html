@@ -1,0 +1,446 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-10 mx-auto">
+        <div class="card bg-secondary">
+            <div class="card-header">
+                <div class="row align-items-center">
+                    <div class="col">
+                        <h4 class="mb-0">Quiz Session</h4>
+                        <small class="text-muted" id="category-display">Category: All</small>
+                    </div>
+                    <div class="col-auto">
+                        <span class="badge bg-info" id="question-counter">Question 1 of 10</span>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <!-- Question Display -->
+                <div id="question-container" class="mb-4">
+                    <div class="alert alert-info text-center">
+                        <h5>Loading question...</h5>
+                    </div>
+                </div>
+
+                <!-- Answer Options -->
+                <div id="options-container" class="mb-4">
+                    <!-- Options will be populated by JavaScript -->
+                </div>
+
+                <!-- Feedback Area -->
+                <div id="feedback-container" class="mb-3" style="display: none;">
+                    <!-- Feedback will be shown here -->
+                </div>
+
+                <!-- Controls -->
+                <div class="d-flex justify-content-between">
+                    <button class="btn btn-outline-light" onclick="endQuiz()">End Quiz</button>
+                    <div>
+                        <button class="btn btn-success" id="submit-btn" onclick="submitAnswer()" disabled>Submit Answer</button>
+                        <button class="btn btn-primary" id="next-btn" onclick="nextQuestion()" style="display: none;">Next Question</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentQuestion = null;
+let selectedAnswer = null;
+let currentMode = 'standard';
+let quickFireTimer = null;
+let quickFireStartTime = null;
+let isSingleQuestionMode = false;
+
+// Load first question on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadNextQuestion();
+});
+
+function loadNextQuestion() {
+    fetch('/api/get_question')
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                showError(data.error);
+                return;
+            }
+            
+            if (data.quiz_complete) {
+                if (data.time_up) {
+                    showQuizComplete(null, 'Time\'s up! Quick Fire challenge ended.');
+                } else {
+                    showQuizComplete();
+                }
+                return;
+            }
+            
+            currentQuestion = data;
+            currentMode = data.mode || 'standard';
+            isSingleQuestionMode = data.is_single_question || false;
+            
+            displayQuestion(data);
+            updateStatus();
+            updateButtonVisibility();
+            
+            // Start Quick Fire timer if needed
+            if (currentMode === 'quick_fire' && !quickFireTimer) {
+                startQuickFireTimer();
+            }
+        })
+        .catch(error => {
+            console.error('Error loading question:', error);
+            showError('Failed to load question');
+        });
+}
+
+function displayQuestion(data) {
+    // Update header based on mode
+    let headerText = 'Quiz Session';
+    let categoryText = `Category: ${data.category}`;
+    
+    switch(currentMode) {
+        case 'quick_fire':
+            headerText = '⚡ Quick Fire Mode';
+            categoryText = `${data.category} | Time Challenge!`;
+            break;
+        case 'daily_challenge':
+            headerText = '🗓️ Daily Challenge';
+            categoryText = `Special Question of the Day | ${data.category}`;
+            break;
+        case 'pop_quiz':
+            headerText = '📊 Pop Quiz';
+            categoryText = `Random Question | ${data.category}`;
+            break;
+        case 'mini_quiz':
+            headerText = '⚡ Mini Quiz';
+            categoryText = `${data.category} | Quick Test`;
+            break;
+    }
+    
+    document.querySelector('.card-header h4').textContent = headerText;
+    document.getElementById('category-display').textContent = categoryText;
+    
+    // Display question text
+    document.getElementById('question-container').innerHTML = `
+        <h5 class="text-warning">${data.question}</h5>
+    `;
+    
+    // Display question counter
+    let counterText = `Question ${data.question_number}`;
+    if (data.total_questions) {
+        counterText += ` of ${data.total_questions}`;
+    }
+    document.getElementById('question-counter').textContent = counterText;
+    
+    // Display options
+    let optionsHtml = '';
+    data.options.forEach((option, index) => {
+        optionsHtml += `
+            <div class="form-check mb-2">
+                <input class="form-check-input" type="radio" name="answer" id="option${index}" value="${index}" onchange="selectAnswer(${index})">
+                <label class="form-check-label" for="option${index}">
+                    ${option}
+                </label>
+            </div>
+        `;
+    });
+    
+    document.getElementById('options-container').innerHTML = optionsHtml;
+    
+    // Reset controls
+    document.getElementById('submit-btn').disabled = true;
+    document.getElementById('next-btn').style.display = 'none';
+    document.getElementById('feedback-container').style.display = 'none';
+    selectedAnswer = null;
+}
+
+function updateButtonVisibility() {
+    const endButton = document.querySelector('.btn-outline-light');
+    
+    // Hide end quiz button for single question modes
+    if (isSingleQuestionMode) {
+        endButton.style.display = 'none';
+    } else {
+        endButton.style.display = 'inline-block';
+    }
+}
+
+function selectAnswer(index) {
+    selectedAnswer = index;
+    document.getElementById('submit-btn').disabled = false;
+}
+
+function submitAnswer() {
+    if (selectedAnswer === null) return;
+    
+    fetch('/api/submit_answer', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            answer_index: selectedAnswer
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            showError(data.error);
+            return;
+        }
+        
+        showFeedback(data);
+        updateStatus();
+        
+        // Handle completion based on mode and quiz_complete flag
+        if (data.quiz_complete || isSingleQuestionMode) {
+            clearInterval(quickFireTimer);
+            setTimeout(() => {
+                showQuizComplete(data);
+            }, isSingleQuestionMode ? 3000 : 2000); // Longer delay for single questions
+        }
+    })
+    .catch(error => {
+        console.error('Error submitting answer:', error);
+        showError('Failed to submit answer');
+    });
+}
+
+function showFeedback(data) {
+    let feedbackClass = data.is_correct ? 'alert-success' : 'alert-danger';
+    let feedbackText = data.is_correct ? 
+        '✅ Correct!' : 
+        `❌ Incorrect. The correct answer was: ${currentQuestion.options[data.correct_answer_index]}`;
+    
+    // Add mode-specific feedback
+    if (currentMode === 'quick_fire') {
+        feedbackText += data.is_correct ? ' Keep going! 🔥' : ' Keep pushing! ⚡';
+    } else if (currentMode === 'daily_challenge') {
+        feedbackText += data.is_correct ? ' Great job on today\'s challenge! 🌟' : ' Better luck tomorrow! 💪';
+    } else if (currentMode === 'pop_quiz') {
+        feedbackText += data.is_correct ? ' Nice work! 👍' : ' Good try! 💪';
+    }
+    
+    let feedbackHtml = `
+        <div class="alert ${feedbackClass}">
+            <strong>${feedbackText}</strong>
+            ${data.explanation ? `<br><small><strong>Explanation:</strong> ${data.explanation}</small>` : ''}
+            ${data.points_earned ? `<br><small>Points earned: ${data.points_earned}</small>` : ''}
+        </div>
+    `;
+    
+    if (data.new_badges && data.new_badges.length > 0) {
+        feedbackHtml += `
+            <div class="alert alert-info">
+                <strong>🎉 Achievement Unlocked!</strong><br>
+                ${data.new_badges.join('<br>')}
+            </div>
+        `;
+    }
+    
+    document.getElementById('feedback-container').innerHTML = feedbackHtml;
+    document.getElementById('feedback-container').style.display = 'block';
+    
+    // Disable all radio buttons
+    document.querySelectorAll('input[name="answer"]').forEach(input => {
+        input.disabled = true;
+    });
+    
+    // Hide submit button after answering
+    document.getElementById('submit-btn').style.display = 'none';
+    
+    // Handle next button logic
+    if (isSingleQuestionMode || data.quiz_complete) {
+        // Don't show next button for single question modes or when quiz is complete
+        document.getElementById('next-btn').style.display = 'none';
+    } else {
+        // Show next button for multi-question modes that aren't complete
+        document.getElementById('next-btn').style.display = 'inline-block';
+    }
+}
+
+function nextQuestion() {
+    loadNextQuestion();
+}
+
+function endQuiz() {
+    if (confirm('Are you sure you want to end the quiz?')) {
+        clearInterval(quickFireTimer);
+        fetch('/api/end_quiz', {
+            method: 'POST'
+        })
+        .then(response => response.json())
+        .then(data => {
+            showQuizResults(data);
+        })
+        .catch(error => {
+            console.error('Error ending quiz:', error);
+            showError('Failed to end quiz');
+        });
+    }
+}
+
+function showQuizComplete(data = null, customMessage = null) {
+    clearInterval(quickFireTimer);
+    
+    if (data) {
+        showQuizResults(data, customMessage);
+    } else {
+        fetch('/api/end_quiz', {
+            method: 'POST'
+        })
+        .then(response => response.json())
+        .then(data => {
+            showQuizResults(data, customMessage);
+        })
+        .catch(error => {
+            console.error('Error getting quiz results:', error);
+            showError('Failed to get quiz results');
+        });
+    }
+}
+
+function showQuizResults(data, customMessage = null) {
+    let modeTitle = 'Quiz Complete!';
+    let modeEmoji = '🎉';
+    
+    switch(currentMode) {
+        case 'quick_fire':
+            modeTitle = 'Quick Fire Complete!';
+            modeEmoji = '⚡';
+            break;
+        case 'daily_challenge':
+            modeTitle = 'Daily Challenge Complete!';
+            modeEmoji = '🗓️';
+            break;
+        case 'pop_quiz':
+            modeTitle = 'Pop Quiz Complete!';
+            modeEmoji = '📊';
+            break;
+        case 'mini_quiz':
+            modeTitle = 'Mini Quiz Complete!';
+            modeEmoji = '⚡';
+            break;
+    }
+    
+    let resultsHtml = `
+        <div class="alert alert-info text-center">
+            <h4>${modeEmoji} ${modeTitle}</h4>
+    `;
+    
+    if (customMessage) {
+        resultsHtml += `<p class="text-warning">${customMessage}</p>`;
+    }
+    
+    resultsHtml += `
+            <p>Final Score: ${data.session_score} / ${data.session_total} (${data.accuracy.toFixed(1)}%)</p>
+            <p>Points Earned: ${data.session_points}</p>
+    `;
+    
+    // Add mode-specific messages
+    if (currentMode === 'daily_challenge') {
+        resultsHtml += `<p class="text-success">Come back tomorrow for a new challenge!</p>`;
+    } else if (currentMode === 'quick_fire') {
+        resultsHtml += `<p class="text-warning">Great job completing the time challenge!</p>`;
+    } else if (currentMode === 'pop_quiz') {
+        resultsHtml += `<p class="text-info">Thanks for taking the pop quiz!</p>`;
+    }
+    
+    resultsHtml += `
+            <button class="btn btn-primary" onclick="window.location.href='/'">Return to Home</button>
+        </div>
+    `;
+    
+    document.getElementById('question-container').innerHTML = resultsHtml;
+    document.getElementById('options-container').innerHTML = '';
+    document.getElementById('feedback-container').style.display = 'none';
+    document.querySelector('.d-flex.justify-content-between').style.display = 'none';
+    
+    // Hide timer if it exists
+    const timerDisplay = document.getElementById('timer-display');
+    if (timerDisplay) {
+        timerDisplay.style.display = 'none';
+    }
+}
+
+function startQuickFireTimer() {
+    // Add timer display to the page
+    const headerRow = document.querySelector('.card-header .row');
+    const timerCol = document.createElement('div');
+    timerCol.className = 'col-auto';
+    timerCol.id = 'timer-display';
+    timerCol.innerHTML = '<span class="badge bg-danger" id="timer-badge">3:00</span>';
+    headerRow.appendChild(timerCol);
+    
+    quickFireStartTime = Date.now();
+    
+    quickFireTimer = setInterval(() => {
+        fetch('/api/quick_fire_status')
+            .then(response => response.json())
+            .then(data => {
+                if (!data.active) {
+                    clearInterval(quickFireTimer);
+                    return;
+                }
+                
+                const timeRemaining = Math.max(0, data.time_remaining);
+                const minutes = Math.floor(timeRemaining / 60);
+                const seconds = Math.floor(timeRemaining % 60);
+                const timerBadge = document.getElementById('timer-badge');
+                
+                if (timerBadge) {
+                    timerBadge.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                    
+                    // Change color based on time remaining
+                    if (timeRemaining <= 30) {
+                        timerBadge.className = 'badge bg-danger';
+                    } else if (timeRemaining <= 60) {
+                        timerBadge.className = 'badge bg-warning';
+                    } else {
+                        timerBadge.className = 'badge bg-info';
+                    }
+                }
+                
+                if (data.should_end) {
+                    clearInterval(quickFireTimer);
+                    showQuizComplete(null, data.time_up ? 'Time\'s up!' : null);
+                }
+            })
+            .catch(error => {
+                console.error('Error checking Quick Fire status:', error);
+            });
+    }, 1000);
+}
+
+function updateStatus() {
+    fetch('/api/status')
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('points-display').textContent = `Points: ${data.total_points}`;
+            document.getElementById('streak-display').textContent = `Streak: ${data.current_streak}`;
+        })
+        .catch(error => {
+            console.error('Error updating status:', error);
+        });
+}
+
+function showError(message) {
+    document.getElementById('question-container').innerHTML = `
+        <div class="alert alert-danger text-center">
+            <h5>Error</h5>
+            <p>${message}</p>
+            <button class="btn btn-primary" onclick="window.location.href='/'">Return to Home</button>
+        </div>
+    `;
+    
+    document.getElementById('options-container').innerHTML = '';
+    document.getElementById('feedback-container').style.display = 'none';
+    document.querySelector('.d-flex.justify-content-between').style.display = 'none';
+}
+</script>
+{% endblock %}
