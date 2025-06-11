@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 
 {% block content %}
+<div id="focus-mode-prompt" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 9998; justify-content: center; align-items: center; text-align: center; flex-direction: column;">
+    <h3 class="text-white">Focus Mode Enabled</h3>
+    <p class="text-white-50">Click the button below to enter fullscreen for the quiz.</p>
+    <button class="btn btn-primary btn-lg mt-2" id="enter-focus-btn">Enter Focus Mode</button>
+</div>
+
 <div class="row">
     <div class="col-lg-10 mx-auto">
         <div class="card bg-secondary">
@@ -16,24 +22,18 @@
                 </div>
             </div>
             <div class="card-body">
-                <!-- Question Display -->
                 <div id="question-container" class="mb-4">
                     <div class="alert alert-info text-center">
                         <h5>Loading question...</h5>
                     </div>
                 </div>
 
-                <!-- Answer Options -->
                 <div id="options-container" class="mb-4">
-                    <!-- Options will be populated by JavaScript -->
-                </div>
+                    </div>
 
-                <!-- Feedback Area -->
                 <div id="feedback-container" class="mb-3" style="display: none;">
-                    <!-- Feedback will be shown here -->
-                </div>
+                    </div>
 
-                <!-- Controls -->
                 <div class="d-flex justify-content-between">
                     <button class="btn btn-outline-light" onclick="endQuiz()">End Quiz</button>
                     <div>
@@ -67,7 +67,7 @@ function checkQuizStatus() {
             if (data.quiz_active) {
                 // Resume existing quiz
                 currentMode = data.quiz_mode || 'standard';
-                checkAndApplyFullscreen(); // Add this line
+                checkAndApplyFullscreen(); // Check if focus mode should be prompted
                 loadNextQuestion();
             } else {
                 // Show start message
@@ -112,11 +112,6 @@ function loadNextQuestion() {
             
             displayQuestion(data);
             updateStatus();
-            
-            // Apply fullscreen on first question only
-            if (data.question_number === 1) {
-                checkAndApplyFullscreen();
-            }
             
             // Start Quick Fire timer if needed
             if (currentMode === 'quick_fire' && !quickFireTimer) {
@@ -319,7 +314,7 @@ function endQuiz() {
                 })
                 .then(response => response.json())
                 .then(data => {
-                    if (data.success) {
+                    if (data.success || data.session_score !== undefined) {
                         showQuizResults(data);
                     } else {
                         showError(data.error || 'Failed to end quiz');
@@ -341,7 +336,7 @@ function endQuiz() {
                 })
                 .then(response => response.json())
                 .then(data => {
-                    if (data.success) {
+                    if (data.success || data.session_score !== undefined) {
                         showQuizResults(data);
                     } else {
                         showError(data.error || 'Failed to end quiz');
@@ -365,8 +360,8 @@ function showQuizComplete(data = null) {
             method: 'POST'
         })
         .then(response => response.json())
-        .then(data => {
-            showQuizResults(data);
+        .then(resData => {
+            showQuizResults(resData);
         })
         .catch(error => {
             console.error('Error getting quiz results:', error);
@@ -394,12 +389,13 @@ function showQuizResults(data) {
             modeEmoji = '🔍';
             break;
     }
+    const accuracy = data.session_total > 0 ? (data.session_score / data.session_total * 100) : 0;
     
     let resultsHtml = `
         <div class="alert alert-info text-center">
             <h4>${modeEmoji} ${modeTitle}</h4>
-            <p>Final Score: ${data.session_score} / ${data.session_total} (${data.accuracy.toFixed(1)}%)</p>
-            <p>Points Earned: ${data.session_points}</p>
+            <p>Final Score: ${data.session_score} / ${data.session_total} (${accuracy.toFixed(1)}%)</p>
+            <p>Points Earned: ${data.session_points || 0}</p>
             <button class="btn btn-primary" onclick="window.location.href='/'">Return to Home</button>
         </div>
     `;
@@ -407,14 +403,17 @@ function showQuizResults(data) {
     document.getElementById('question-container').innerHTML = resultsHtml;
     document.getElementById('options-container').innerHTML = '';
     document.getElementById('feedback-container').style.display = 'none';
-    document.querySelector('.d-flex.justify-content-between').style.display = 'none';
+    const controls = document.querySelector('.d-flex.justify-content-between');
+    if (controls) controls.style.display = 'none';
+
     // Disable End Quiz button
     const endQuizBtn = document.querySelector('button[onclick="endQuiz()"]');
     if (endQuizBtn) {
         endQuizBtn.disabled = true;
         endQuizBtn.textContent = 'Quiz Ended';
+    }
 }
-}
+
 
 function startQuickFireTimer() {
     // Add timer display
@@ -507,11 +506,11 @@ function enterQuizFullscreen() {
         if (navbar) navbar.style.display = 'none';
         if (statusBar) statusBar.style.display = 'none';
         
-        console.log('Quiz fullscreen activated');
+        console.log('Browser fullscreen activated for quiz');
         
     } catch (error) {
         console.error('Fullscreen not supported:', error);
-        // Fallback: just hide navigation if fullscreen isn't supported
+        // Fallback: just hide navigation if fullscreen fails
         const navbar = document.querySelector('.navbar');
         const statusBar = document.querySelector('.fixed-bottom');
         if (navbar) navbar.style.display = 'none';
@@ -541,7 +540,7 @@ function exitQuizFullscreen() {
         
     } catch (error) {
         console.error('Exit fullscreen error:', error);
-        // Still restore navigation even if fullscreen exit fails
+        // Fallback: restore navigation even if fullscreen exit fails
         const navbar = document.querySelector('.navbar');
         const statusBar = document.querySelector('.fixed-bottom');
         if (navbar) navbar.style.display = '';
@@ -554,16 +553,20 @@ function checkAndApplyFullscreen() {
         .then(response => response.json())
         .then(data => {
             if (data.success && data.settings && data.settings.focusMode) {
-                // Small delay to ensure quiz UI is ready
-                setTimeout(() => {
+                const prompt = document.getElementById('focus-mode-prompt');
+                prompt.style.display = 'flex';
+                
+                document.getElementById('enter-focus-btn').onclick = function() {
                     enterQuizFullscreen();
-                }, 500);
+                    prompt.style.display = 'none';
+                };
             }
         })
         .catch(error => {
             console.error('Error checking fullscreen setting:', error);
         });
 }
+
 
 // Auto-exit fullscreen when user presses Escape or leaves fullscreen
 document.addEventListener('fullscreenchange', function() {
