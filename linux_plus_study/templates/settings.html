@@ -14,7 +14,7 @@
                     <div class="col-md-6">
                         <h5>Study Preferences</h5>
                         <div class="form-check mb-3">
-                            <input class="form-check-input" type="checkbox" id="focusMode">
+                           <input class="form-check-input" type="checkbox" id="focusMode" onchange="toggleFullscreen()">
                             <label class="form-check-label" for="focusMode">
                                 Enable Focus Mode (Fullscreen)
                             </label>
@@ -45,34 +45,123 @@
 <script>
 // Load settings on page load
 document.addEventListener('DOMContentLoaded', function() {
-    loadSettings();
+    applyLoadedSettings();
 });
 
 function saveSettings() {
     const settings = {
         focusMode: document.getElementById('focusMode').checked,
-        breakReminder: parseInt(document.getElementById('breakReminder').value),
-        timestamp: Date.now()
+        breakReminder: parseInt(document.getElementById('breakReminder').value)
     };
     
-    try {
-        localStorage.setItem('studySettings', JSON.stringify(settings));
-        showAlert('Settings saved successfully!', 'success');
-    } catch (error) {
-        console.error('Failed to save settings:', error);
+    fetch('/api/save_settings', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(settings)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert('Settings saved successfully!', 'success');
+        } else {
+            showAlert('Failed to save settings: ' + (data.error || 'Unknown error'), 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error saving settings:', error);
         showAlert('Failed to save settings', 'danger');
+    });
+}
+function toggleFullscreen() {
+    const focusModeEnabled = document.getElementById('focusMode').checked;
+    
+    if (focusModeEnabled) {
+        enterFullscreen();
+    } else {
+        exitFullscreen();
+    }
+}
+
+function enterFullscreen() {
+    try {
+        const elem = document.documentElement;
+        
+        if (elem.requestFullscreen) {
+            elem.requestFullscreen();
+        } else if (elem.mozRequestFullScreen) { // Firefox
+            elem.mozRequestFullScreen();
+        } else if (elem.webkitRequestFullscreen) { // Chrome, Safari
+            elem.webkitRequestFullscreen();
+        } else if (elem.msRequestFullscreen) { // IE/Edge
+            elem.msRequestFullscreen();
+        }
+        
+        // Hide navigation for true focus mode
+        const navbar = document.querySelector('.navbar');
+        const statusBar = document.querySelector('.fixed-bottom');
+        if (navbar) navbar.style.display = 'none';
+        if (statusBar) statusBar.style.display = 'none';
+        
+    } catch (error) {
+        console.error('Fullscreen not supported:', error);
+        showAlert('Fullscreen mode not supported in this environment', 'warning');
+    }
+}
+
+function exitFullscreen() {
+    try {
+        if (document.exitFullscreen) {
+            document.exitFullscreen();
+        } else if (document.mozCancelFullScreen) {
+            document.mozCancelFullScreen();
+        } else if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
+        } else if (document.msExitFullscreen) {
+            document.msExitFullscreen();
+        }
+        
+        // Restore navigation
+        const navbar = document.querySelector('.navbar');
+        const statusBar = document.querySelector('.fixed-bottom');
+        if (navbar) navbar.style.display = '';
+        if (statusBar) statusBar.style.display = '';
+        
+    } catch (error) {
+        console.error('Exit fullscreen error:', error);
+    }
+}
+
+// Auto-apply fullscreen when settings are loaded
+function applyLoadedSettings() {
+    loadSettings();
+    
+    // Apply fullscreen if enabled
+    const focusModeEnabled = document.getElementById('focusMode').checked;
+    if (focusModeEnabled) {
+        // Delay to ensure page is fully loaded
+        setTimeout(() => {
+            enterFullscreen();
+        }, 500);
     }
 }
 
 function loadSettings() {
-    try {
-        const settings = JSON.parse(localStorage.getItem('studySettings') || '{}');
-        
-        document.getElementById('focusMode').checked = settings.focusMode || false;
-        document.getElementById('breakReminder').value = settings.breakReminder || 10;
-    } catch (error) {
-        console.error('Failed to load settings:', error);
-    }
+    fetch('/api/load_settings')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.settings) {
+                document.getElementById('focusMode').checked = data.settings.focusMode || false;
+                document.getElementById('breakReminder').value = data.settings.breakReminder || 10;
+            }
+        })
+        .catch(error => {
+            console.error('Error loading settings:', error);
+            // Use defaults
+            document.getElementById('focusMode').checked = false;
+            document.getElementById('breakReminder').value = 10;
+        });
 }
 
 function exportHistory() {

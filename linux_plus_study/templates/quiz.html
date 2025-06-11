@@ -67,6 +67,7 @@ function checkQuizStatus() {
             if (data.quiz_active) {
                 // Resume existing quiz
                 currentMode = data.quiz_mode || 'standard';
+                checkAndApplyFullscreen(); // Add this line
                 loadNextQuestion();
             } else {
                 // Show start message
@@ -111,6 +112,11 @@ function loadNextQuestion() {
             
             displayQuestion(data);
             updateStatus();
+            
+            // Apply fullscreen on first question only
+            if (data.question_number === 1) {
+                checkAndApplyFullscreen();
+            }
             
             // Start Quick Fire timer if needed
             if (currentMode === 'quick_fire' && !quickFireTimer) {
@@ -180,6 +186,7 @@ function displayQuestion(data) {
     
     // Reset controls
     document.getElementById('submit-btn').disabled = true;
+    document.getElementById('submit-btn').style.display = 'inline-block';  // Show submit button
     document.getElementById('next-btn').style.display = 'none';
     document.getElementById('feedback-container').style.display = 'none';
     document.querySelector('.d-flex.justify-content-between').style.display = 'flex';
@@ -271,12 +278,18 @@ function showFeedback(data) {
         input.disabled = true;
     });
     
-    // Hide submit button after answering
+    // Hide submit button
     document.getElementById('submit-btn').style.display = 'none';
     
-    // Show next button for multi-question modes
+    // ALWAYS show next button for multi-question modes unless session is complete
     if (!isSingleQuestionMode && !data.session_complete) {
         document.getElementById('next-btn').style.display = 'inline-block';
+        document.getElementById('next-btn').disabled = false;
+    } else if (data.session_complete || isSingleQuestionMode) {
+        // For completed sessions or single questions
+        setTimeout(() => {
+            showQuizComplete(data);
+        }, 2000);
     }
 }
 
@@ -285,24 +298,61 @@ function nextQuestion() {
 }
 
 function endQuiz() {
-    if (confirm('Are you sure you want to end the quiz?')) {
-        clearInterval(quickFireTimer);
-        fetch('/api/end_quiz', {
-            method: 'POST'
-        })
+    // Check if quiz is still active
+    fetch('/api/status')
         .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                showQuizResults(data);
-            } else {
-                showError(data.error || 'Failed to end quiz');
+        .then(statusData => {
+            if (!statusData.quiz_active) {
+                // Quiz already ended, redirect to home
+                showAlert('Quiz session has already ended', 'info');
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 1500);
+                return;
+            }
+            
+            // Quiz is active, proceed with normal end confirmation
+            if (confirm('Are you sure you want to end the quiz?')) {
+                clearInterval(quickFireTimer);
+                fetch('/api/end_quiz', {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showQuizResults(data);
+                    } else {
+                        showError(data.error || 'Failed to end quiz');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error ending quiz:', error);
+                    showError('Failed to end quiz');
+                });
             }
         })
         .catch(error => {
-            console.error('Error ending quiz:', error);
-            showError('Failed to end quiz');
+            console.error('Error checking quiz status:', error);
+            // Fallback: still allow ending if status check fails
+            if (confirm('Are you sure you want to end the quiz?')) {
+                clearInterval(quickFireTimer);
+                fetch('/api/end_quiz', {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showQuizResults(data);
+                    } else {
+                        showError(data.error || 'Failed to end quiz');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error ending quiz:', error);
+                    showError('Failed to end quiz');
+                });
+            }
         });
-    }
 }
 
 function showQuizComplete(data = null) {
@@ -326,6 +376,7 @@ function showQuizComplete(data = null) {
 }
 
 function showQuizResults(data) {
+    exitQuizFullscreen();
     let modeTitle = 'Quiz Complete!';
     let modeEmoji = '🎉';
     
@@ -357,6 +408,12 @@ function showQuizResults(data) {
     document.getElementById('options-container').innerHTML = '';
     document.getElementById('feedback-container').style.display = 'none';
     document.querySelector('.d-flex.justify-content-between').style.display = 'none';
+    // Disable End Quiz button
+    const endQuizBtn = document.querySelector('button[onclick="endQuiz()"]');
+    if (endQuizBtn) {
+        endQuizBtn.disabled = true;
+        endQuizBtn.textContent = 'Quiz Ended';
+}
 }
 
 function startQuickFireTimer() {
@@ -430,5 +487,95 @@ function showError(message) {
     document.getElementById('feedback-container').style.display = 'none';
     document.querySelector('.d-flex.justify-content-between').style.display = 'none';
 }
+// Use pywebview window fullscreen instead of document fullscreen
+function enterQuizFullscreen() {
+    fetch('/api/set_fullscreen', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({enable: true})
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            console.log('Application window fullscreen activated');
+            // Hide navigation bars since we're in fullscreen
+            const navbar = document.querySelector('.navbar');
+            const statusBar = document.querySelector('.fixed-bottom');
+            if (navbar) navbar.style.display = 'none';
+            if (statusBar) statusBar.style.display = 'none';
+        } else {
+            console.error('Failed to enter fullscreen:', data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error entering fullscreen:', error);
+    });
+}
+
+function exitQuizFullscreen() {
+    // Restore navigation first
+    const navbar = document.querySelector('.navbar');
+    const statusBar = document.querySelector('.fixed-bottom');
+    if (navbar) navbar.style.display = '';
+    if (statusBar) statusBar.style.display = '';
+    
+    fetch('/api/set_fullscreen', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({enable: false})
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            console.log('Exited application window fullscreen');
+        } else {
+            console.error('Failed to exit fullscreen:', data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error exiting fullscreen:', error);
+    });
+}
+
+function checkAndApplyFullscreen() {
+    fetch('/api/load_settings')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.settings && data.settings.focusMode) {
+                // Small delay to ensure quiz UI is ready
+                setTimeout(() => {
+                    enterQuizFullscreen();
+                }, 500);
+            }
+        })
+        .catch(error => {
+            console.error('Error checking fullscreen setting:', error);
+        });
+}
+
+// Auto-exit fullscreen when user presses Escape or leaves fullscreen
+document.addEventListener('fullscreenchange', function() {
+    if (!document.fullscreenElement) {
+        // User exited fullscreen manually, restore UI
+        exitQuizFullscreen();
+    }
+});
+
+// Handle other browsers
+document.addEventListener('webkitfullscreenchange', function() {
+    if (!document.webkitFullscreenElement) {
+        exitQuizFullscreen();
+    }
+});
+
+document.addEventListener('mozfullscreenchange', function() {
+    if (!document.mozFullScreenElement) {
+        exitQuizFullscreen();
+    }
+});
 </script>
 {% endblock %}

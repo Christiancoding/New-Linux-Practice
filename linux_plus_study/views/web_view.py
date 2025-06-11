@@ -32,6 +32,15 @@ class LinuxPlusStudyWeb:
         self.debug = debug
         self.window = None
 
+        # Add caching to reduce lag
+        self.app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 300  # Cache static files for 5 minutes
+        self.app.config['TEMPLATES_AUTO_RELOAD'] = False  # Disable template auto-reload in production
+        
+        # Session configuration for better performance
+        self.app.secret_key = 'your-secret-key-here'  # Add a proper secret key
+        self.app.config['SESSION_TYPE'] = 'filesystem'
+        self.app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour
+
         from controllers.quiz_controller import QuizController
         from controllers.stats_controller import StatsController
         
@@ -49,6 +58,26 @@ class LinuxPlusStudyWeb:
         self.daily_challenge_completed = False
         
         self.setup_routes()
+    # Add these methods to the LinuxPlusStudyWeb class after __init__
+
+    def toggle_fullscreen(self, enable=True):
+        """Toggle application window fullscreen."""
+        try:
+            if hasattr(self, 'window') and self.window:
+                self.window.fullscreen = enable
+                return {'success': True, 'fullscreen': enable}
+            return {'success': False, 'error': 'Window not available'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def is_fullscreen(self):
+        """Check if window is in fullscreen mode."""
+        try:
+            if hasattr(self, 'window') and self.window:
+                return {'success': True, 'fullscreen': getattr(self.window, 'fullscreen', False)}
+            return {'success': False, 'fullscreen': False}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
     def reset_quiz_state(self):
         """Reset quiz state variables."""
         self.quiz_active = False
@@ -374,6 +403,58 @@ class LinuxPlusStudyWeb:
         @self.app.errorhandler(500)
         def internal_error(error):
             return render_template('error.html', error="Internal server error"), 500
+        
+        @self.app.route('/api/save_settings', methods=['POST'])
+        def api_save_settings():
+            try:
+                data = request.get_json()
+                settings = {
+                    'focusMode': data.get('focusMode', False),
+                    'breakReminder': data.get('breakReminder', 10),
+                    'timestamp': time.time()
+                }
+                
+                # Save to a simple file (you could also use the game_state)
+                import json
+                with open('web_settings.json', 'w') as f:
+                    json.dump(settings, f)
+                
+                return jsonify({'success': True})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
+
+        @self.app.route('/api/load_settings')
+        def api_load_settings():
+            try:
+                import json
+                try:
+                    with open('web_settings.json', 'r') as f:
+                        settings = json.load(f)
+                    return jsonify({'success': True, 'settings': settings})
+                except FileNotFoundError:
+                    # Return defaults
+                    return jsonify({'success': True, 'settings': {'focusMode': False, 'breakReminder': 10}})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
+        # Add these routes in the setup_routes method after the existing routes
+
+        @self.app.route('/api/set_fullscreen', methods=['POST'])
+        def api_set_fullscreen():
+            try:
+                data = request.get_json()
+                enable = data.get('enable', True)
+                result = self.toggle_fullscreen(enable)
+                return jsonify(result)
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
+
+        @self.app.route('/api/get_fullscreen_status')
+        def api_get_fullscreen_status():
+            try:
+                result = self.is_fullscreen()
+                return jsonify(result)
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
     def handle_api_errors(f):
         def wrapper(*args, **kwargs):
             try:
@@ -402,7 +483,7 @@ class LinuxPlusStudyWeb:
         time.sleep(1)
         
         # Create the desktop window
-        self.window = webview.create_window(
+        window = webview.create_window(
             title='Linux+ Study Game',
             url='http://127.0.0.1:5000',
             width=1200,
@@ -410,6 +491,9 @@ class LinuxPlusStudyWeb:
             min_size=(800, 600),
             resizable=True
         )
+        
+        # Store window reference for fullscreen control
+        self.window = window
         
         # Start the webview (this blocks until window is closed)
         webview.start(debug=self.debug)

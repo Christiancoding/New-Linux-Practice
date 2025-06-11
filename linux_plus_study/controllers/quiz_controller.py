@@ -42,6 +42,20 @@ class QuizController:
         # Daily challenge
         self.daily_challenge_completed = False
         self.last_daily_challenge_date = None
+    def get_current_question(self):
+        """Get the current question without advancing."""
+        if not self.quiz_active:
+            return None
+            
+        # Return cached current question if available
+        if hasattr(self, '_current_question_cache'):
+            return self._current_question_cache
+        
+        return None
+
+    def cache_current_question(self, question_data):
+        """Cache the current question for repeated access."""
+        self._current_question_cache = question_data
     
     def start_quiz_session(self, mode=QUIZ_MODE_STANDARD, category_filter=None):
         """
@@ -98,6 +112,10 @@ class QuizController:
         if not self.quiz_active:
             return None
         
+        # Clear previous cache
+        if hasattr(self, '_current_question_cache'):
+            delattr(self, '_current_question_cache')
+        
         # Check Quick Fire time limit
         if self.quick_fire_active and not self.check_quick_fire_status():
             return None
@@ -112,6 +130,18 @@ class QuizController:
         if question_data is None:
             self.quiz_active = False
             return None
+        if question_data is not None:
+            result = {
+                'question_data': question_data,
+                'original_index': original_index,
+                'question_number': self.session_total + 1,
+                'streak': self.current_streak,
+                'quick_fire_remaining': self._get_quick_fire_remaining() if self.quick_fire_active else None
+            }
+            self._current_question_cache = result
+            return result
+        
+        return None
         
         return {
             'question_data': question_data,
