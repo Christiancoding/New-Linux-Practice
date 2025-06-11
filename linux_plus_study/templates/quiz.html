@@ -487,58 +487,66 @@ function showError(message) {
     document.getElementById('feedback-container').style.display = 'none';
     document.querySelector('.d-flex.justify-content-between').style.display = 'none';
 }
-// Use pywebview window fullscreen instead of document fullscreen
 function enterQuizFullscreen() {
-    fetch('/api/set_fullscreen', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({enable: true})
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            console.log('Application window fullscreen activated');
-            // Hide navigation bars since we're in fullscreen
-            const navbar = document.querySelector('.navbar');
-            const statusBar = document.querySelector('.fixed-bottom');
-            if (navbar) navbar.style.display = 'none';
-            if (statusBar) statusBar.style.display = 'none';
-        } else {
-            console.error('Failed to enter fullscreen:', data.error);
+    try {
+        const elem = document.documentElement;
+        
+        if (elem.requestFullscreen) {
+            elem.requestFullscreen();
+        } else if (elem.mozRequestFullScreen) { // Firefox
+            elem.mozRequestFullScreen();
+        } else if (elem.webkitRequestFullscreen) { // Chrome, Safari
+            elem.webkitRequestFullscreen();
+        } else if (elem.msRequestFullscreen) { // IE/Edge
+            elem.msRequestFullscreen();
         }
-    })
-    .catch(error => {
-        console.error('Error entering fullscreen:', error);
-    });
+        
+        // Hide navigation for true focus mode
+        const navbar = document.querySelector('.navbar');
+        const statusBar = document.querySelector('.fixed-bottom');
+        if (navbar) navbar.style.display = 'none';
+        if (statusBar) statusBar.style.display = 'none';
+        
+        console.log('Quiz fullscreen activated');
+        
+    } catch (error) {
+        console.error('Fullscreen not supported:', error);
+        // Fallback: just hide navigation if fullscreen isn't supported
+        const navbar = document.querySelector('.navbar');
+        const statusBar = document.querySelector('.fixed-bottom');
+        if (navbar) navbar.style.display = 'none';
+        if (statusBar) statusBar.style.display = 'none';
+    }
 }
 
 function exitQuizFullscreen() {
-    // Restore navigation first
-    const navbar = document.querySelector('.navbar');
-    const statusBar = document.querySelector('.fixed-bottom');
-    if (navbar) navbar.style.display = '';
-    if (statusBar) statusBar.style.display = '';
-    
-    fetch('/api/set_fullscreen', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({enable: false})
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            console.log('Exited application window fullscreen');
-        } else {
-            console.error('Failed to exit fullscreen:', data.error);
+    try {
+        if (document.exitFullscreen) {
+            document.exitFullscreen();
+        } else if (document.mozCancelFullScreen) {
+            document.mozCancelFullScreen();
+        } else if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
+        } else if (document.msExitFullscreen) {
+            document.msExitFullscreen();
         }
-    })
-    .catch(error => {
-        console.error('Error exiting fullscreen:', error);
-    });
+        
+        // Restore navigation
+        const navbar = document.querySelector('.navbar');
+        const statusBar = document.querySelector('.fixed-bottom');
+        if (navbar) navbar.style.display = '';
+        if (statusBar) statusBar.style.display = '';
+        
+        console.log('Exited quiz fullscreen');
+        
+    } catch (error) {
+        console.error('Exit fullscreen error:', error);
+        // Still restore navigation even if fullscreen exit fails
+        const navbar = document.querySelector('.navbar');
+        const statusBar = document.querySelector('.fixed-bottom');
+        if (navbar) navbar.style.display = '';
+        if (statusBar) statusBar.style.display = '';
+    }
 }
 
 function checkAndApplyFullscreen() {
