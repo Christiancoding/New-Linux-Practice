@@ -5,7 +5,12 @@ Provides a safe, educational terminal simulation environment.
 """
 
 from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
+import subprocess
+import os
+import json
+import shlex
+from pathlib import Path
 
 
 
@@ -18,6 +23,38 @@ class CLIPlayground:
         self.username = "user"
         self.hostname = "linux-playground"
         self.command_history = []
+        self.command_history = []
+        self.current_directory = os.getcwd()
+        self.safe_commands = {
+            'ls': self._cmd_ls,
+            'pwd': self._cmd_pwd,
+            'cd': self._cmd_cd,
+            'echo': self._cmd_echo,
+            'cat': self._cmd_cat,
+            'head': self._cmd_head,
+            'tail': self._cmd_tail,
+            'grep': self._cmd_grep,
+            'find': self._cmd_find,
+            'wc': self._cmd_wc,
+            'sort': self._cmd_sort,
+            'uniq': self._cmd_uniq,
+            'date': self._cmd_date,
+            'whoami': self._cmd_whoami,
+            'ps': self._cmd_ps,
+            'df': self._cmd_df,
+            'free': self._cmd_free,
+            'uptime': self._cmd_uptime,
+            'history': self._cmd_history,
+            'clear': self._cmd_clear,
+            'help': self._cmd_help
+        }
+        
+        # Create a safe sandbox directory
+        self.sandbox_dir = Path.cwd() / "cli_sandbox"
+        self.sandbox_dir.mkdir(exist_ok=True)
+        
+        # Initialize sample files
+        self._create_sample_files()
         
         # Simulated file system
         self.file_system = {
@@ -585,3 +622,365 @@ class CLIPlayground:
         
         target = args[0]
         return f"Unmounted {target}"
+    def _create_sample_files(self):
+        """Create sample files for CLI practice"""
+        sample_files = {
+            'sample.txt': 'This is a sample text file.\nIt contains multiple lines.\nUse it to practice Linux commands!',
+            'data.csv': 'name,age,city\nJohn,25,NYC\nJane,30,LA\nBob,35,Chicago',
+            'notes.md': '# Linux Study Notes\n\n## Commands\n- ls: list files\n- cat: display file contents\n- grep: search text',
+            'log.txt': 'INFO: Application started\nWARN: Low memory\nERROR: Connection failed\nINFO: Process completed'
+        }
+        
+        for filename, content in sample_files.items():
+            file_path = self.sandbox_dir / filename
+            if not file_path.exists():
+                file_path.write_text(content)
+    
+    def execute_command(self, command: str) -> Dict[str, Any]:
+        """
+        Execute a command safely in the CLI playground
+        
+        Args:
+            command: The command string to execute
+            
+        Returns:
+            Dict containing output, error, and status
+        """
+        if not command.strip():
+            return {
+                'output': '',
+                'error': '',
+                'status': 'success',
+                'command': command
+            }
+        
+        # Add to history
+        self.command_history.append(command)
+        
+        # Parse command
+        try:
+            parts = shlex.split(command)
+            cmd_name = parts[0].lower()
+            args = parts[1:] if len(parts) > 1 else []
+        except ValueError as e:
+            return {
+                'output': '',
+                'error': f'Error parsing command: {e}',
+                'status': 'error',
+                'command': command
+            }
+        
+        # Execute safe command
+        if cmd_name in self.safe_commands:
+            try:
+                result = self.safe_commands[cmd_name](args)
+                return {
+                    'output': result,
+                    'error': '',
+                    'status': 'success',
+                    'command': command
+                }
+            except Exception as e:
+                return {
+                    'output': '',
+                    'error': f'Error executing {cmd_name}: {e}',
+                    'status': 'error',
+                    'command': command
+                }
+        else:
+            return {
+                'output': '',
+                'error': f'Command "{cmd_name}" not allowed in playground. Type "help" for available commands.',
+                'status': 'error',
+                'command': command
+            }
+    
+    def _cmd_ls(self, args: List[str]) -> str:
+        """List directory contents"""
+        target_dir = self.sandbox_dir
+        
+        if args and args[0] != '-l':
+            # Simple path handling for safety
+            if args[0] == '..':
+                return 'Permission denied: Cannot access parent directory'
+            elif args[0] == '.':
+                target_dir = self.sandbox_dir
+        
+        try:
+            files = list(target_dir.iterdir())
+            if '-l' in args:
+                # Long format
+                output = []
+                for file in files:
+                    stat = file.stat()
+                    size = stat.st_size
+                    name = file.name
+                    file_type = 'd' if file.is_dir() else '-'
+                    output.append(f'{file_type}rw-r--r-- 1 user user {size:8d} {name}')
+                return '\n'.join(output)
+            else:
+                # Simple format
+                return '  '.join([f.name for f in files if not f.name.startswith('.')])
+        except Exception as e:
+            return f'ls: {e}'
+    
+    def _cmd_pwd(self, args: List[str]) -> str:
+        """Print working directory"""
+        return str(self.sandbox_dir)
+    
+    def _cmd_cd(self, args: List[str]) -> str:
+        """Change directory (limited to sandbox)"""
+        if not args:
+            return str(self.sandbox_dir)
+        
+        target = args[0]
+        if target in ['..', '/', '~']:
+            return 'Permission denied: Cannot leave sandbox directory'
+        
+        return f'Changed to {self.sandbox_dir}'
+    
+    def _cmd_echo(self, args: List[str]) -> str:
+        """Echo arguments"""
+        return ' '.join(args)
+    
+    def _cmd_cat(self, args: List[str]) -> str:
+        """Display file contents"""
+        if not args:
+            return 'cat: missing filename'
+        
+        filename = args[0]
+        file_path = self.sandbox_dir / filename
+        
+        if not file_path.exists():
+            return f'cat: {filename}: No such file or directory'
+        
+        if not file_path.is_file():
+            return f'cat: {filename}: Is a directory'
+        
+        try:
+            return file_path.read_text()
+        except Exception as e:
+            return f'cat: {filename}: {e}'
+    
+    def _cmd_head(self, args: List[str]) -> str:
+        """Display first lines of file"""
+        if not args:
+            return 'head: missing filename'
+        
+        filename = args[0]
+        lines = 10  # default
+        
+        if len(args) > 1 and args[0] == '-n':
+            try:
+                lines = int(args[1])
+                filename = args[2] if len(args) > 2 else None
+            except (ValueError, IndexError):
+                return 'head: invalid number of lines'
+        
+        if not filename:
+            return 'head: missing filename'
+        
+        file_path = self.sandbox_dir / filename
+        
+        if not file_path.exists():
+            return f'head: {filename}: No such file or directory'
+        
+        try:
+            content = file_path.read_text()
+            return '\n'.join(content.split('\n')[:lines])
+        except Exception as e:
+            return f'head: {filename}: {e}'
+    
+    def _cmd_tail(self, args: List[str]) -> str:
+        """Display last lines of file"""
+        if not args:
+            return 'tail: missing filename'
+        
+        filename = args[0]
+        lines = 10  # default
+        
+        if len(args) > 1 and args[0] == '-n':
+            try:
+                lines = int(args[1])
+                filename = args[2] if len(args) > 2 else None
+            except (ValueError, IndexError):
+                return 'tail: invalid number of lines'
+        
+        if not filename:
+            return 'tail: missing filename'
+        
+        file_path = self.sandbox_dir / filename
+        
+        if not file_path.exists():
+            return f'tail: {filename}: No such file or directory'
+        
+        try:
+            content = file_path.read_text()
+            return '\n'.join(content.split('\n')[-lines:])
+        except Exception as e:
+            return f'tail: {filename}: {e}'
+    
+    def _cmd_grep(self, args: List[str]) -> str:
+        """Search for pattern in file"""
+        if len(args) < 2:
+            return 'grep: missing pattern or filename'
+        
+        pattern = args[0]
+        filename = args[1]
+        file_path = self.sandbox_dir / filename
+        
+        if not file_path.exists():
+            return f'grep: {filename}: No such file or directory'
+        
+        try:
+            content = file_path.read_text()
+            matching_lines = []
+            for line in content.split('\n'):
+                if pattern.lower() in line.lower():
+                    matching_lines.append(line)
+            return '\n'.join(matching_lines) if matching_lines else ''
+        except Exception as e:
+            return f'grep: {filename}: {e}'
+    
+    def _cmd_find(self, args: List[str]) -> str:
+        """Find files"""
+        if not args:
+            files = list(self.sandbox_dir.iterdir())
+            return '\n'.join([f'./{f.name}' for f in files if f.is_file()])
+        
+        if args[0] == '-name' and len(args) > 1:
+            pattern = args[1].strip('"\'')
+            files = list(self.sandbox_dir.glob(pattern))
+            return '\n'.join([f'./{f.name}' for f in files])
+        
+        return 'find: simple usage only - try "find" or "find -name pattern"'
+    
+    def _cmd_wc(self, args: List[str]) -> str:
+        """Word count"""
+        if not args:
+            return 'wc: missing filename'
+        
+        filename = args[0]
+        file_path = self.sandbox_dir / filename
+        
+        if not file_path.exists():
+            return f'wc: {filename}: No such file or directory'
+        
+        try:
+            content = file_path.read_text()
+            lines = len(content.split('\n'))
+            words = len(content.split())
+            chars = len(content)
+            return f'{lines:8d} {words:8d} {chars:8d} {filename}'
+        except Exception as e:
+            return f'wc: {filename}: {e}'
+    
+    def _cmd_sort(self, args: List[str]) -> str:
+        """Sort file contents"""
+        if not args:
+            return 'sort: missing filename'
+        
+        filename = args[0]
+        file_path = self.sandbox_dir / filename
+        
+        if not file_path.exists():
+            return f'sort: {filename}: No such file or directory'
+        
+        try:
+            content = file_path.read_text()
+            lines = content.split('\n')
+            sorted_lines = sorted(lines)
+            return '\n'.join(sorted_lines)
+        except Exception as e:
+            return f'sort: {filename}: {e}'
+    
+    def _cmd_uniq(self, args: List[str]) -> str:
+        """Remove duplicate lines"""
+        if not args:
+            return 'uniq: missing filename'
+        
+        filename = args[0]
+        file_path = self.sandbox_dir / filename
+        
+        if not file_path.exists():
+            return f'uniq: {filename}: No such file or directory'
+        
+        try:
+            content = file_path.read_text()
+            lines = content.split('\n')
+            unique_lines = []
+            prev_line = None
+            for line in lines:
+                if line != prev_line:
+                    unique_lines.append(line)
+                prev_line = line
+            return '\n'.join(unique_lines)
+        except Exception as e:
+            return f'uniq: {filename}: {e}'
+    
+    def _cmd_date(self, args: List[str]) -> str:
+        """Display current date"""
+        from datetime import datetime
+        return datetime.now().strftime('%a %b %d %H:%M:%S %Z %Y')
+    
+    def _cmd_whoami(self, args: List[str]) -> str:
+        """Display current user"""
+        return 'student'
+    
+    def _cmd_ps(self, args: List[str]) -> str:
+        """Display processes (simulated)"""
+        return '''  PID TTY          TIME CMD
+ 1234 pts/0    00:00:01 bash
+ 5678 pts/0    00:00:00 python
+ 9012 pts/0    00:00:00 ps'''
+    
+    def _cmd_df(self, args: List[str]) -> str:
+        """Display filesystem usage (simulated)"""
+        return '''Filesystem     1K-blocks    Used Available Use% Mounted on
+/dev/sda1       20480000 8192000  11264000  42% /
+tmpfs            2048000  102400   1945600   5% /dev/shm'''
+    
+    def _cmd_free(self, args: List[str]) -> str:
+        """Display memory usage (simulated)"""
+        return '''              total        used        free      shared  buff/cache   available
+Mem:        8192000     2048000     4096000      102400     2048000     5632000
+Swap:       2048000           0     2048000'''
+    
+    def _cmd_uptime(self, args: List[str]) -> str:
+        """Display system uptime (simulated)"""
+        return ' 15:30:42 up 2 days,  4:30,  1 user,  load average: 0.15, 0.10, 0.05'
+    
+    def _cmd_history(self, args: List[str]) -> str:
+        """Display command history"""
+        if not self.command_history:
+            return ''
+        
+        output = []
+        for i, cmd in enumerate(self.command_history[-20:], 1):  # Last 20 commands
+            output.append(f'{i:5d}  {cmd}')
+        return '\n'.join(output)
+    
+    def _cmd_clear(self, args: List[str]) -> str:
+        """Clear screen command"""
+        return 'CLEAR_SCREEN'  # Special marker for frontend
+    
+    def _cmd_help(self, args: List[str]) -> str:
+        """Display available commands"""
+        commands = sorted(self.safe_commands.keys())
+        return f'''Available commands in CLI Playground:
+{', '.join(commands)}
+
+Educational Linux environment for safe command practice.
+Note: This is a sandbox environment with limited functionality.
+
+Examples:
+  ls              - list files
+  cat sample.txt  - view file contents
+  grep INFO log.txt - search for pattern
+  wc data.csv     - count lines/words/chars
+  head -n 5 notes.md - show first 5 lines
+'''
+
+def get_cli_playground():
+    """Get CLI playground instance"""
+    return CLIPlayground()

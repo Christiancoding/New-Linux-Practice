@@ -1,0 +1,517 @@
+<!-- templates/cli_playground.html -->
+{% extends "base.html" %}
+
+{% block extra_css %}
+<style>
+.cli-container {
+    background: #1a1a1a;
+    color: #00ff00;
+    font-family: 'Courier New', monospace;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+    margin: 20px 0;
+}
+
+.cli-header {
+    background: #333;
+    color: #fff;
+    padding: 10px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #555;
+}
+
+.cli-terminal {
+    height: 500px;
+    overflow-y: auto;
+    padding: 20px;
+    background: #000;
+    position: relative;
+}
+
+.cli-output {
+    white-space: pre-wrap;
+    margin-bottom: 10px;
+    line-height: 1.4;
+}
+
+.cli-command {
+    color: #00ff00;
+    font-weight: bold;
+}
+
+.cli-result {
+    color: #ffffff;
+    margin-left: 0;
+}
+
+.cli-error {
+    color: #ff4444;
+}
+
+.cli-input-line {
+    display: flex;
+    align-items: center;
+    margin-top: 10px;
+}
+
+.cli-prompt {
+    color: #00ff00;
+    margin-right: 10px;
+    font-weight: bold;
+}
+
+.cli-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: #00ff00;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    outline: none;
+    caret-color: #00ff00;
+}
+
+.cli-cursor {
+    background: #00ff00;
+    width: 8px;
+    height: 16px;
+    animation: blink 1s infinite;
+}
+
+@keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+}
+
+.cli-controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.btn-cli {
+    background: #333;
+    color: #00ff00;
+    border: 1px solid #555;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    transition: background 0.3s;
+}
+
+.btn-cli:hover {
+    background: #444;
+}
+
+.cli-help-panel {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px 0;
+}
+
+.command-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-top: 15px;
+}
+
+.command-item {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 10px;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.command-item:hover {
+    background: #f5f5f5;
+}
+
+.command-name {
+    font-weight: bold;
+    color: #007bff;
+    font-family: 'Courier New', monospace;
+}
+
+.command-desc {
+    font-size: 12px;
+    color: #666;
+    margin-top: 5px;
+}
+
+.cli-tutorial {
+    background: #e7f3ff;
+    border-left: 4px solid #007bff;
+    padding: 15px;
+    margin: 20px 0;
+    border-radius: 0 4px 4px 0;
+}
+
+.loading-indicator {
+    display: none;
+    color: #ffaa00;
+}
+
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #00ff00;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h1 class="mb-4">
+        <i class="fas fa-terminal"></i> CLI Playground
+    </h1>
+    
+    <div class="row">
+        <div class="col-lg-8">
+            <!-- CLI Terminal -->
+            <div class="cli-container">
+                <div class="cli-header">
+                    <div class="status-indicator">
+                        <div class="status-dot"></div>
+                        <span>Linux Study Terminal</span>
+                    </div>
+                    <div>
+                        <span class="loading-indicator" id="loadingIndicator">
+                            <i class="fas fa-spinner fa-spin"></i> Processing...
+                        </span>
+                    </div>
+                </div>
+                
+                <div class="cli-terminal" id="cliTerminal">
+                    <div class="cli-output">
+                        <div class="cli-result">Welcome to Linux Plus CLI Playground!</div>
+                        <div class="cli-result">Type 'help' to see available commands.</div>
+                        <div class="cli-result">This is a safe educational environment for practicing Linux commands.</div>
+                        <div class="cli-result"></div>
+                    </div>
+                    
+                    <div class="cli-input-line">
+                        <span class="cli-prompt">student@linux-study:~/sandbox$</span>
+                        <input type="text" class="cli-input" id="cliInput" 
+                               placeholder="Enter command..." autocomplete="off">
+                    </div>
+                </div>
+            </div>
+            
+            <!-- CLI Controls -->
+            <div class="cli-controls">
+                <button type="button" class="btn-cli" onclick="clearTerminal()">
+                    <i class="fas fa-trash"></i> Clear
+                </button>
+                <button type="button" class="btn-cli" onclick="showHistory()">
+                    <i class="fas fa-history"></i> History
+                </button>
+                <button type="button" class="btn-cli" onclick="showHelp()">
+                    <i class="fas fa-question-circle"></i> Help
+                </button>
+                <button type="button" class="btn-cli" onclick="resetPlayground()">
+                    <i class="fas fa-refresh"></i> Reset
+                </button>
+            </div>
+        </div>
+        
+        <div class="col-lg-4">
+            <!-- Tutorial Section -->
+            <div class="cli-tutorial">
+                <h5><i class="fas fa-lightbulb"></i> Quick Tutorial</h5>
+                <p>Try these basic commands to get started:</p>
+                <ul class="mb-0">
+                    <li><code>ls</code> - List files in current directory</li>
+                    <li><code>cat sample.txt</code> - View file contents</li>
+                    <li><code>grep INFO log.txt</code> - Search for text</li>
+                    <li><code>wc data.csv</code> - Count lines/words</li>
+                    <li><code>help</code> - Show all commands</li>
+                </ul>
+            </div>
+            
+            <!-- Available Commands -->
+            <div class="cli-help-panel">
+                <h5><i class="fas fa-list"></i> Available Commands</h5>
+                <p class="text-muted">Click on any command to insert it into the terminal:</p>
+                <div class="command-grid" id="commandGrid">
+                    <!-- Commands will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Command History Modal -->
+<div class="modal fade" id="historyModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Command History</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="historyContent" style="font-family: 'Courier New', monospace; background: #f8f9fa; padding: 15px; border-radius: 4px; max-height: 400px; overflow-y: auto;">
+                    <!-- History will be loaded here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-danger" onclick="clearHistory()">Clear History</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let commandHistory = [];
+let historyIndex = -1;
+
+// Initialize CLI Playground
+document.addEventListener('DOMContentLoaded', function() {
+    loadAvailableCommands();
+    focusInput();
+    
+    // Handle enter key in input
+    document.getElementById('cliInput').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            executeCommand();
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            navigateHistory('up');
+        } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            navigateHistory('down');
+        }
+    });
+    
+    // Keep input focused
+    document.getElementById('cliTerminal').addEventListener('click', function() {
+        focusInput();
+    });
+});
+
+function focusInput() {
+    document.getElementById('cliInput').focus();
+}
+
+function executeCommand() {
+    const input = document.getElementById('cliInput');
+    const command = input.value.trim();
+    
+    if (!command) return;
+    
+    // Add to local history
+    commandHistory.push(command);
+    historyIndex = commandHistory.length;
+    
+    // Display command in terminal
+    addToTerminal(command, 'command');
+    
+    // Show loading
+    showLoading(true);
+    
+    // Clear input
+    input.value = '';
+    
+    // Execute command
+    fetch('/api/cli/execute', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ command: command })
+    })
+    .then(response => response.json())
+    .then(data => {
+        showLoading(false);
+        
+        if (data.success) {
+            if (data.output === 'CLEAR_SCREEN') {
+                clearTerminal();
+            } else {
+                if (data.output) {
+                    addToTerminal(data.output, 'result');
+                }
+                if (data.error) {
+                    addToTerminal(data.error, 'error');
+                }
+            }
+        } else {
+            addToTerminal(data.error || 'Unknown error occurred', 'error');
+        }
+        
+        scrollToBottom();
+        focusInput();
+    })
+    .catch(error => {
+        showLoading(false);
+        addToTerminal('Network error: ' + error.message, 'error');
+        scrollToBottom();
+        focusInput();
+    });
+}
+
+function addToTerminal(text, type) {
+    const terminal = document.getElementById('cliTerminal');
+    const inputLine = terminal.querySelector('.cli-input-line');
+    
+    const output = document.createElement('div');
+    output.className = 'cli-output';
+    
+    if (type === 'command') {
+        output.innerHTML = `<div class="cli-command">student@linux-study:~/sandbox$ ${text}</div>`;
+    } else if (type === 'error') {
+        output.innerHTML = `<div class="cli-error">${text}</div>`;
+    } else {
+        output.innerHTML = `<div class="cli-result">${text}</div>`;
+    }
+    
+    terminal.insertBefore(output, inputLine);
+}
+
+function scrollToBottom() {
+    const terminal = document.getElementById('cliTerminal');
+    terminal.scrollTop = terminal.scrollHeight;
+}
+
+function showLoading(show) {
+    const indicator = document.getElementById('loadingIndicator');
+    indicator.style.display = show ? 'block' : 'none';
+}
+
+function clearTerminal() {
+    const terminal = document.getElementById('cliTerminal');
+    const outputs = terminal.querySelectorAll('.cli-output');
+    outputs.forEach(output => output.remove());
+    
+    // Add welcome message back
+    addToTerminal('Terminal cleared.', 'result');
+    focusInput();
+}
+
+function navigateHistory(direction) {
+    const input = document.getElementById('cliInput');
+    
+    if (direction === 'up' && historyIndex > 0) {
+        historyIndex--;
+        input.value = commandHistory[historyIndex];
+    } else if (direction === 'down') {
+        if (historyIndex < commandHistory.length - 1) {
+            historyIndex++;
+            input.value = commandHistory[historyIndex];
+        } else {
+            historyIndex = commandHistory.length;
+            input.value = '';
+        }
+    }
+}
+
+function showHistory() {
+    fetch('/api/cli/history')
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const content = document.getElementById('historyContent');
+            if (data.history.length === 0) {
+                content.innerHTML = '<em>No commands in history</em>';
+            } else {
+                content.innerHTML = data.history.map((cmd, index) => 
+                    `<div style="margin: 5px 0; cursor: pointer;" onclick="insertCommand('${cmd.replace(/'/g, "\\'")}')">${index + 1}. ${cmd}</div>`
+                ).join('');
+            }
+            
+            const modal = new bootstrap.Modal(document.getElementById('historyModal'));
+            modal.show();
+        }
+    })
+    .catch(error => {
+        addToTerminal('Error loading history: ' + error.message, 'error');
+    });
+}
+
+function clearHistory() {
+    fetch('/api/cli/clear', { method: 'POST' })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            commandHistory = [];
+            historyIndex = -1;
+            document.getElementById('historyContent').innerHTML = '<em>History cleared</em>';
+            addToTerminal('Command history cleared.', 'result');
+        }
+    })
+    .catch(error => {
+        addToTerminal('Error clearing history: ' + error.message, 'error');
+    });
+}
+
+function showHelp() {
+    executeCommandDirect('help');
+}
+
+function resetPlayground() {
+    if (confirm('Reset playground? This will clear the terminal and command history.')) {
+        clearTerminal();
+        clearHistory();
+        addToTerminal('Playground reset. Welcome back!', 'result');
+        addToTerminal('Type "help" to see available commands.', 'result');
+    }
+}
+
+function loadAvailableCommands() {
+    fetch('/api/cli/commands')
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const grid = document.getElementById('commandGrid');
+            grid.innerHTML = data.commands.map(cmd => `
+                <div class="command-item" onclick="insertCommand('${cmd.command}')">
+                    <div class="command-name">${cmd.command}</div>
+                    <div class="command-desc">${cmd.description}</div>
+                </div>
+            `).join('');
+        }
+    })
+    .catch(error => {
+        console.error('Error loading commands:', error);
+    });
+}
+
+function insertCommand(command) {
+    const input = document.getElementById('cliInput');
+    input.value = command;
+    focusInput();
+}
+
+function executeCommandDirect(command) {
+    const input = document.getElementById('cliInput');
+    input.value = command;
+    executeCommand();
+}
+</script>
+{% endblock %}

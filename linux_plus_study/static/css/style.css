@@ -124,3 +124,182 @@ body {
         transform: translateY(0); 
     }
 }
+/* Add these styles to static/css/style.css */
+
+/* CLI Playground Responsive Design */
+@media (max-width: 768px) {
+    .cli-terminal {
+        height: 400px;
+        padding: 15px;
+    }
+    
+    .cli-controls {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    
+    .btn-cli {
+        font-size: 11px;
+        padding: 6px 12px;
+    }
+    
+    .command-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+    
+    .cli-help-panel {
+        margin-top: 15px;
+    }
+}
+
+/* Dark mode support for CLI */
+.dark-mode .cli-help-panel {
+    background: #2d3748;
+    border-color: #4a5568;
+    color: #e2e8f0;
+}
+
+.dark-mode .command-item {
+    background: #4a5568;
+    border-color: #718096;
+    color: #e2e8f0;
+}
+
+.dark-mode .command-item:hover {
+    background: #718096;
+}
+
+.dark-mode .command-name {
+    color: #63b3ed;
+}
+
+.dark-mode .command-desc {
+    color: #cbd5e0;
+}
+
+.dark-mode .cli-tutorial {
+    background: #1a365d;
+    border-left-color: #3182ce;
+    color: #e2e8f0;
+}
+
+/* CLI Navigation icon */
+.nav-link i.fa-terminal {
+    margin-right: 8px;
+    color: #00ff00;
+}
+
+/* Syntax highlighting for CLI output */
+.cli-syntax-highlight {
+    color: #ffaa00;
+}
+
+.cli-file-highlight {
+    color: #00aaff;
+}
+
+.cli-dir-highlight {
+    color: #ff00aa;
+    font-weight: bold;
+}
+
+/* CLI placeholder animation */
+.cli-input::placeholder {
+    color: #555;
+    opacity: 0.7;
+}
+
+/* Scrollbar styling for terminal */
+.cli-terminal::-webkit-scrollbar {
+    width: 8px;
+}
+
+.cli-terminal::-webkit-scrollbar-track {
+    background: #1a1a1a;
+}
+
+.cli-terminal::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 4px;
+}
+
+.cli-terminal::-webkit-scrollbar-thumb:hover {
+    background: #777;
+}
+
+/* Loading animation */
+.loading-dots::after {
+    content: '';
+    animation: loading-dots 1.5s infinite;
+}
+
+@keyframes loading-dots {
+    0%, 20% { content: '.'; }
+    40% { content: '..'; }
+    60%, 100% { content: '...'; }
+}
+
+/* CLI command auto-completion styling */
+.cli-suggestion {
+    background: #333;
+    color: #fff;
+    padding: 5px 10px;
+    border-radius: 4px;
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    z-index: 1000;
+    display: none;
+}
+
+.cli-suggestion.show {
+    display: block;
+}
+
+/* Error and success indicators */
+.cli-status-success {
+    color: #28a745;
+}
+
+.cli-status-error {
+    color: #dc3545;
+}
+
+.cli-status-warning {
+    color: #ffc107;
+}
+
+/* CLI accessibility improvements */
+.cli-input:focus {
+    outline: 2px solid #00ff00;
+    outline-offset: -2px;
+}
+
+.btn-cli:focus {
+    outline: 2px solid #00ff00;
+    outline-offset: 2px;
+}
+
+/* Print styles for CLI content */
+@media print {
+    .cli-container {
+        background: white !important;
+        color: black !important;
+        box-shadow: none;
+        border: 1px solid #000;
+    }
+    
+    .cli-terminal {
+        background: white !important;
+        color: black !important;
+    }
+    
+    .cli-controls {
+        display: none;
+    }
+    
+    .cli-input-line {
+        display: none;
+    }
+}

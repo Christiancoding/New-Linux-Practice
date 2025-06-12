@@ -21,6 +21,10 @@
                 <a class="nav-link" href="/achievements" data-page="achievements">Achievements</a>
                 <a class="nav-link" href="/review" data-page="review">Review</a>
                 <a class="nav-link" href="/settings" data-page="settings">Settings</a>
+                    <a class="nav-link {% if active_page == 'cli_playground' %}active{% endif %}" 
+       href="{{ url_for('cli_playground_page') }}">
+        <i class="fas fa-terminal"></i> CLI Playground
+    </a>
         </div>
             </div>
         </div>

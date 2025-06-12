@@ -15,11 +15,13 @@ import hashlib
 import time
 import logging
 import traceback
+from utils.cli_playground import get_cli_playground
 from utils.config import (
     QUICK_FIRE_QUESTIONS, QUICK_FIRE_TIME_LIMIT, MINI_QUIZ_QUESTIONS,
     POINTS_PER_CORRECT, POINTS_PER_INCORRECT, STREAK_BONUS_THRESHOLD, STREAK_BONUS_MULTIPLIER
 )
 
+cli_playground = get_cli_playground()
 
 class LinuxPlusStudyWeb:
     """Web interface using Flask + pywebview for desktop app experience."""
@@ -169,6 +171,126 @@ class LinuxPlusStudyWeb:
                     'session_points': 0,
                     'quiz_mode': None,
                     'error': str(e)
+                })
+        @self. app.route('/cli-playground')
+        def cli_playground_page():
+            """CLI Playground page"""
+            return render_template('cli_playground.html', 
+                                title='CLI Playground',
+                                active_page='cli_playground')
+
+        @self.app.route('/api/cli/execute', methods=['POST'])
+        def execute_cli_command():
+            """Execute CLI command via AJAX"""
+            try:
+                data = request.get_json()
+                command = data.get('command', '').strip()
+                
+                if not command:
+                    return jsonify({
+                        'success': False,
+                        'error': 'No command provided'
+                    })
+                
+                # Execute command in playground
+                result = cli_playground.execute_command(command)
+                
+                return jsonify({
+                    'success': True,
+                    'output': result['output'],
+                    'error': result['error'],
+                    'status': result['status'],
+                    'command': result['command']
+                })
+                
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Server error: {str(e)}'
+                })
+
+        @self.app.route('/api/cli/clear', methods=['POST'])
+        def clear_cli_history():
+            """Clear CLI command history"""
+            try:
+                global cli_playground
+                cli_playground.command_history = []
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'History cleared'
+                })
+                
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Server error: {str(e)}'
+                })
+
+        @self.app.route('/api/cli/history', methods=['GET'])
+        def get_cli_history():
+            """Get CLI command history"""
+            try:
+                history = cli_playground.command_history[-50:]  # Last 50 commands
+                
+                return jsonify({
+                    'success': True,
+                    'history': history
+                })
+                
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Server error: {str(e)}'
+                })
+
+        @self.app.route('/api/cli/commands', methods=['GET'])
+        def get_available_commands():
+            """Get list of available CLI commands"""
+            try:
+                commands = list(cli_playground.safe_commands.keys())
+                commands.sort()
+                
+                command_descriptions = {
+                    'ls': 'List directory contents',
+                    'pwd': 'Print working directory',
+                    'cd': 'Change directory',
+                    'echo': 'Display text',
+                    'cat': 'Display file contents',
+                    'head': 'Display first lines of file',
+                    'tail': 'Display last lines of file',
+                    'grep': 'Search for pattern in file',
+                    'find': 'Find files',
+                    'wc': 'Word, line, character count',
+                    'sort': 'Sort lines in file',
+                    'uniq': 'Remove duplicate lines',
+                    'date': 'Display current date',
+                    'whoami': 'Display current user',
+                    'ps': 'Display running processes',
+                    'df': 'Display filesystem usage',
+                    'free': 'Display memory usage',
+                    'uptime': 'Display system uptime',
+                    'history': 'Display command history',
+                    'clear': 'Clear screen',
+                    'help': 'Display available commands'
+                }
+                
+                detailed_commands = []
+                for cmd in commands:
+                    detailed_commands.append({
+                        'command': cmd,
+                        'description': command_descriptions.get(cmd, 'No description available')
+                    })
+                
+                return jsonify({
+                    'success': True,
+                    'commands': detailed_commands
+                })
+                
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Server error: {str(e)}'
                 })
         
         @self.app.route('/api/start_quiz', methods=['POST'])
