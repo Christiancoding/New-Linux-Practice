@@ -520,7 +520,7 @@ class LinuxPlusStudyCLI:
 
             if user_answer == 'q':
                 cli_print_info("Quitting quiz session.")
-                if mode == "quick_fire": self.game_logic._end_quick_fire_mode(time_up=True)
+                if mode == "quick_fire": self.game_logic.end_quick_fire_mode(time_up=True)
                 break 
             elif user_answer == 's':
                 cli_print_info("Skipping question...")
