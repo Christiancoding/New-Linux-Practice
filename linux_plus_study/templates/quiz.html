@@ -54,6 +54,125 @@ let currentMode = 'standard';
 let quickFireTimer = null;
 let isSingleQuestionMode = false;
 
+function showBreakReminder(questionsSinceBreak, breakInterval) {
+    const modalHtml = `
+        <div class="modal fade" id="breakReminderModal" tabindex="-1" aria-labelledby="breakReminderModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content bg-dark">
+                    <div class="modal-header border-secondary">
+                        <h5 class="modal-title text-info" id="breakReminderModalLabel">
+                            <i class="fas fa-coffee"></i> Time for a Break!
+                        </h5>
+                    </div>
+                    <div class="modal-body text-center">
+                        <div class="mb-3">
+                            <i class="fas fa-clock text-warning" style="font-size: 3rem;"></i>
+                        </div>
+                        <p class="mb-3">You've answered <strong>${questionsSinceBreak}</strong> questions.</p>
+                        <p class="mb-3">Take a moment to rest your eyes and stretch!</p>
+                        <div id="breakTimer" class="mb-3" style="display: none;">
+                            <div class="h4 text-info" id="timerDisplay">02:00</div>
+                            <div class="progress" style="height: 8px;">
+                                <div class="progress-bar bg-info" role="progressbar" style="width: 100%" id="timerProgress"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer border-secondary justify-content-center">
+                        <button type="button" class="btn btn-primary" onclick="skipBreak()">
+                            <i class="fas fa-forward"></i> Skip Break
+                        </button>
+                        <button type="button" class="btn btn-success" onclick="takeBreak()" id="takeBreakBtn">
+                            <i class="fas fa-play"></i> Start Break (2 min)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    const existingModal = document.getElementById('breakReminderModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    const modal = new bootstrap.Modal(document.getElementById('breakReminderModal'));
+    modal.show();
+}
+
+function takeBreak() {
+    const takeBreakBtn = document.getElementById('takeBreakBtn');
+    const timerDisplay = document.getElementById('timerDisplay');
+    const timerProgress = document.getElementById('timerProgress');
+    const breakTimer = document.getElementById('breakTimer');
+    
+    takeBreakBtn.disabled = true;
+    takeBreakBtn.innerHTML = '<i class="fas fa-pause"></i> Taking Break...';
+    breakTimer.style.display = 'block';
+    
+    let breakDuration = 120; // 2 minutes
+    let remainingTime = breakDuration;
+    
+    const countdown = setInterval(() => {
+        const minutes = Math.floor(remainingTime / 60);
+        const seconds = remainingTime % 60;
+        
+        timerDisplay.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        
+        const progress = ((breakDuration - remainingTime) / breakDuration) * 100;
+        timerProgress.style.width = progress + '%';
+        
+        remainingTime--;
+        
+        if (remainingTime < 0) {
+            clearInterval(countdown);
+            endBreak();
+        }
+    }, 1000);
+}
+
+function skipBreak() {
+    acknowledgeBreak();
+}
+
+function endBreak() {
+    showAlert('Break time is over! Ready to continue?', 'success');
+    acknowledgeBreak();
+}
+
+function acknowledgeBreak() {
+    const modal = bootstrap.Modal.getInstance(document.getElementById('breakReminderModal'));
+    if (modal) {
+        modal.hide();
+    }
+    
+    setTimeout(() => {
+        const modalElement = document.getElementById('breakReminderModal');
+        if (modalElement) {
+            modalElement.remove();
+        }
+    }, 300);
+    
+    fetch('/api/acknowledge_break', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            loadNextQuestion();
+        } else {
+            showAlert('Error acknowledging break', 'danger');
+            loadNextQuestion();
+        }
+    })
+    .catch(error => {
+        console.error('Error acknowledging break:', error);
+        loadNextQuestion();
+    });
+}
 // Load first question on page load
 document.addEventListener('DOMContentLoaded', function() {
     checkQuizStatus();
@@ -129,6 +248,12 @@ function loadNextQuestion() {
                 return;
             }
 
+            // Check for break reminder
+            if (data.break_reminder) {
+                showBreakReminder(data.questions_since_break, data.break_interval);
+                return;
+            }
+
             currentQuestion = data;
             currentMode = data.mode || 'standard';
             isSingleQuestionMode = data.is_single_question || false;
@@ -142,7 +267,7 @@ function loadNextQuestion() {
         })
         .catch(error => {
             console.error('Error loading question:', error);
-            showError('Failed to load question');
+            showError('Failed to load question. Please try again.');
         });
 }
 

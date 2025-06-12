@@ -48,7 +48,37 @@ class LinuxPlusStudyWeb:
         self.stats_controller = StatsController(game_state)
         
         self.setup_routes()
-    # Add these methods to the LinuxPlusStudyWeb class after __init__
+    def _should_show_break_reminder(self):
+        """Check if break reminder should be shown based on current settings."""
+        try:
+            settings = self._load_web_settings()
+            break_interval = settings.get('breakReminder', 10)
+            
+            # Check if break reminders are enabled (interval > 0) and threshold met
+            return (break_interval > 0 and 
+                    self.quiz_controller.questions_since_break >= break_interval)
+        except:
+            return False
+    
+    def _get_break_interval(self):
+        """Get the current break reminder interval from settings."""
+        try:
+            settings = self._load_web_settings()
+            return settings.get('breakReminder', 10)
+        except:
+            return 10
+
+    def _load_web_settings(self):
+        """Load settings from web_settings.json file."""
+        try:
+            if os.path.exists('web_settings.json'):
+                with open('web_settings.json', 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            print(f"Error loading web settings: {e}")
+        
+        # Return default settings if file doesn't exist or can't be loaded
+        return {'focusMode': False, 'breakReminder': 10}
 
     def toggle_fullscreen(self, enable=True):
         """Toggle application window fullscreen."""
@@ -163,37 +193,25 @@ class LinuxPlusStudyWeb:
         @self.app.route('/api/get_question')
         def api_get_question():
             try:
-                # Validate session state
                 if not self.quiz_controller.quiz_active:
                     return jsonify({'quiz_complete': True, 'error': 'No active quiz session'})
                 
-                # Check if we have a cached current question first
-                cached_question = self.quiz_controller.get_current_question()
-                if cached_question:
-                    # Return cached question data
-                    q_text, options, _, category, _ = cached_question['question_data']
+                # Check for break reminder before getting next question
+                if self._should_show_break_reminder():
                     return jsonify({
-                        'question': q_text,
-                        'options': options,
-                        'category': category,
-                        'question_number': cached_question.get('question_number', 1),
-                        'streak': cached_question.get('streak', 0),
-                        'mode': self.quiz_controller.current_quiz_mode,
-                        'is_single_question': self.quiz_controller.current_quiz_mode in ['daily_challenge', 'pop_quiz'],
-                        'quiz_complete': False,
-                        'quick_fire_remaining': cached_question.get('quick_fire_remaining'),
-                        'from_cache': True  # Debug flag
+                        'break_reminder': True,
+                        'questions_since_break': self.quiz_controller.questions_since_break,
+                        'break_interval': self._get_break_interval()
                     })
-                
-                # Get new question
-                result = self.quiz_controller.get_next_question(
-                    self.quiz_controller.category_filter if hasattr(self.quiz_controller, 'category_filter') else None
-                )
+                    
+                result = self.quiz_controller.get_next_question(self.current_category_filter)
                 
                 if result is None:
-                    # Session complete
-                    session_results = self.quiz_controller.force_end_session()
-                    return jsonify({'quiz_complete': True, **session_results})
+                    return jsonify({'quiz_complete': True})
+                
+                # Store current question info
+                self.current_question_data = result['question_data']
+                self.current_question_index = result['original_index']
                 
                 # Format response for web interface
                 q_text, options, _, category, _ = result['question_data']
@@ -208,17 +226,21 @@ class LinuxPlusStudyWeb:
                     'is_single_question': self.quiz_controller.current_quiz_mode in ['daily_challenge', 'pop_quiz'],
                     'quiz_complete': False,
                     'quick_fire_remaining': result.get('quick_fire_remaining'),
-                    'from_cache': False  # Debug flag
+                    'break_reminder': False
                 })
                 
             except Exception as e:
                 print(f"Error in get_question: {e}")
-                # Force end session on error to prevent stuck state
-                try:
-                    self.quiz_controller.force_end_session()
-                except:
-                    pass
                 return jsonify({'error': str(e), 'quiz_complete': True})
+        @self.app.route('/api/acknowledge_break', methods=['POST'])
+        def api_acknowledge_break():
+            """Reset break counter when user acknowledges break reminder."""
+            try:
+                self.quiz_controller.reset_break_counter()
+                return jsonify({'success': True})
+            except Exception as e:
+                print(f"Error acknowledging break: {e}")
+                return jsonify({'success': False, 'error': str(e)})
 
         @self.app.route('/api/submit_answer', methods=['POST'])
         def api_submit_answer():
