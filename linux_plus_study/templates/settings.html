@@ -13,25 +13,25 @@
                 <div class="row">
                     <div class="col-md-6">
                         <h5>Study Preferences</h5>
-                        <div class="form-check mb-3">
-                           <input class="form-check-input" type="checkbox" id="focusMode" onchange="toggleFullscreen()">
+                        <div class="form-check form-switch mb-3">
+                           <input class="form-check-input" type="checkbox" id="focusMode">
                             <label class="form-check-label" for="focusMode">
-                                Enable Focus Mode (Fullscreen)
+                                Enable Focus Mode (Fullscreen on Quiz Start)
                             </label>
                         </div>
                         <div class="mb-3">
-                            <label for="breakReminder" class="form-label">Break Reminder (questions)</label>
+                            <label for="breakReminder" class="form-label">Break Reminder (every X questions)</label>
                             <input type="number" class="form-control bg-dark text-light" id="breakReminder" value="10" min="1" max="50">
                         </div>
                         <button class="btn btn-success" onclick="saveSettings()">Save Settings</button>
                     </div>
                     <div class="col-md-6">
                         <h5>Data Management</h5>
-                        <button class="btn btn-outline-info mb-2 d-block" onclick="exportHistory()">
+                        <button class="btn btn-outline-info mb-2 d-block w-100" onclick="exportHistory()">
                             <i class="fas fa-download"></i> Export History
                         </button>
-                        <button class="btn btn-outline-danger d-block" onclick="clearHistory()">
-                            <i class="fas fa-trash"></i> Clear History
+                        <button class="btn btn-outline-danger d-block w-100" onclick="clearHistory()">
+                            <i class="fas fa-trash"></i> Clear All Statistics
                         </button>
                     </div>
                 </div>
@@ -45,102 +45,52 @@
 <script>
 // Load settings on page load
 document.addEventListener('DOMContentLoaded', function() {
-    applyLoadedSettings();
+    loadSettings();
 });
 
 function saveSettings() {
-    // Check if localStorage is available
-    if (typeof Storage === "undefined" || !localStorage) {
-        showAlert('Settings cannot be saved in this environment. Using session storage as fallback.', 'warning');
-        
-        // Fallback to sessionStorage or in-memory storage
-        try {
-            const settings = {
-                focusMode: document.getElementById('focusMode').checked,
-                breakReminder: parseInt(document.getElementById('breakReminder').value),
-                timestamp: Date.now()
-            };
-            
-            if (sessionStorage) {
-                sessionStorage.setItem('studySettings', JSON.stringify(settings));
-                showAlert('Settings saved for this session only!', 'info');
-            } else {
-                // Store in memory (will be lost on page refresh)
-                window.studySettings = settings;
-                showAlert('Settings saved temporarily (will reset on page refresh)', 'warning');
-            }
-        } catch (error) {
-            showAlert('Cannot save settings in this environment', 'danger');
-        }
-        return;
-    }
-    
     const settings = {
         focusMode: document.getElementById('focusMode').checked,
-        breakReminder: parseInt(document.getElementById('breakReminder').value),
-        timestamp: Date.now()
+        breakReminder: parseInt(document.getElementById('breakReminder').value)
     };
-    
-    try {
-        // Test localStorage access first
-        localStorage.setItem('test_storage', 'test');
-        localStorage.removeItem('test_storage');
-        
-        // Save actual settings
-        localStorage.setItem('studySettings', JSON.stringify(settings));
-        showAlert('Settings saved successfully!', 'success');
-    } catch (error) {
-        console.error('Failed to save settings:', error);
-        if (error.name === 'QuotaExceededError') {
-            showAlert('Storage quota exceeded. Please clear browser data.', 'danger');
-        } else if (error.name === 'SecurityError') {
-            showAlert('Settings cannot be saved in private/incognito mode.', 'warning');
+
+    fetch('/api/save_settings', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(settings)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert('Settings saved successfully!', 'success');
         } else {
-            showAlert('Failed to save settings: ' + error.message, 'danger');
+            showAlert('Failed to save settings: ' + (data.error || 'Unknown error'), 'danger');
         }
-    }
-}
-function toggleFullscreen() {
-    const focusModeEnabled = document.getElementById('focusMode').checked;
-    
-    if (focusModeEnabled) {
-        enterFullscreen();
-    } else {
-        exitFullscreen();
-    }
+    })
+    .catch(error => {
+        console.error('Error saving settings:', error);
+        showAlert('Failed to save settings', 'danger');
+    });
 }
 
 function loadSettings() {
-    try {
-        let settings = {};
-        
-        // Try localStorage first
-        if (localStorage && localStorage.getItem) {
-            const settingsStr = localStorage.getItem('studySettings');
-            if (settingsStr) {
-                settings = JSON.parse(settingsStr);
+    fetch('/api/load_settings')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.settings) {
+                document.getElementById('focusMode').checked = data.settings.focusMode || false;
+                document.getElementById('breakReminder').value = data.settings.breakReminder || 10;
+            } else if(data.error) {
+                console.error('Failed to load settings:', data.error);
+                showAlert('Could not load settings.', 'danger');
             }
-        }
-        // Fallback to sessionStorage
-        else if (sessionStorage && sessionStorage.getItem) {
-            const settingsStr = sessionStorage.getItem('studySettings');
-            if (settingsStr) {
-                settings = JSON.parse(settingsStr);
-            }
-        }
-        // Fallback to in-memory
-        else if (window.studySettings) {
-            settings = window.studySettings;
-        }
-        
-        document.getElementById('focusMode').checked = settings.focusMode || false;
-        document.getElementById('breakReminder').value = settings.breakReminder || 10;
-    } catch (error) {
-        console.error('Failed to load settings:', error);
-        // Use defaults
-        document.getElementById('focusMode').checked = false;
-        document.getElementById('breakReminder').value = 10;
-    }
+        })
+        .catch(error => {
+            console.error('Error loading settings:', error);
+            showAlert('Could not load settings.', 'danger');
+        });
 }
 
 function exportHistory() {
@@ -149,20 +99,20 @@ function exportHistory() {
 }
 
 function clearHistory() {
-    if (confirm('Are you sure you want to clear ALL study history? This action cannot be undone.')) {
+    if (confirm('Are you sure you want to clear ALL study history and statistics? This action cannot be undone.')) {
         fetch('/api/clear_statistics', {
             method: 'POST'
         })
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                showAlert('Study history cleared successfully', 'success');
+                showAlert('All statistics have been cleared.', 'success');
             } else {
-                showAlert('Failed to clear study history: ' + (data.error || 'Unknown error'), 'danger');
+                showAlert('Failed to clear statistics: ' + (data.error || 'Unknown error'), 'danger');
             }
         })
         .catch(error => {
-            showAlert('Failed to clear study history', 'danger');
+            showAlert('Failed to clear statistics', 'danger');
         });
     }
 }

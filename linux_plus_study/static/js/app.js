@@ -6,6 +6,60 @@ document.addEventListener('DOMContentLoaded', function() {
     // If we are on the settings page, load the settings from the server
     if (window.location.pathname.includes('settings')) {
         loadSettings();
+        // Add event listeners for auto-saving settings on change
+        const focusModeEl = document.getElementById('focusMode');
+        const breakReminderEl = document.getElementById('breakReminder');
+
+        if (focusModeEl) {
+            focusModeEl.addEventListener('change', saveSettings);
+        }
+        if (breakReminderEl) {
+            breakReminderEl.addEventListener('change', saveSettings);
+        }
+    }
+
+    // Check for saved dark mode preference
+    if (localStorage.getItem('darkMode') === 'enabled') {
+        document.body.classList.add('dark-mode');
+    }
+
+    // Add event listeners for buttons if they exist
+    const darkModeToggle = document.getElementById('darkModeToggle');
+    if (darkModeToggle) {
+        darkModeToggle.addEventListener('click', toggleDarkMode);
+    }
+
+    const exportHistoryBtn = document.getElementById('exportHistoryBtn');
+    if (exportHistoryBtn) {
+        exportHistoryBtn.addEventListener('click', exportHistory);
+    }
+
+    const importHistoryBtn = document.getElementById('importHistoryBtn');
+    if (importHistoryBtn) {
+        importHistoryBtn.addEventListener('click', importHistory);
+    }
+
+    const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+    if (clearHistoryBtn) {
+        clearHistoryBtn.addEventListener('click', clearHistory);
+    }
+    
+    // Add event listener for search functionality if it exists
+    const searchInput = document.getElementById('searchInput');
+    if(searchInput) {
+        searchInput.addEventListener('input', function() {
+            const query = this.value.toLowerCase();
+            const items = document.querySelectorAll('.searchable-item');
+            
+            items.forEach(item => {
+                const text = item.textContent.toLowerCase();
+                if (text.includes(query)) {
+                    item.style.display = '';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        });
     }
 });
 
@@ -139,6 +193,8 @@ function loadSettings() {
     });
 }
 
+// --- History Management (Import/Export/Clear) ---
+
 /**
  * Initiates the export of study history by redirecting to the API endpoint.
  */
@@ -151,6 +207,47 @@ function exportHistory() {
     link.click();
     document.body.removeChild(link);
     showAlert('Study history export started.', 'info');
+}
+
+/**
+ * Handles the import of study history from a JSON file.
+ */
+function importHistory() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    
+    input.onchange = function(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const data = JSON.parse(e.target.result);
+                fetch('/api/import_history', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                }).then(response => {
+                    if (response.ok) {
+                        showAlert('Study history imported successfully', 'success');
+                         // Optionally, refresh the page or statistics view
+                    } else {
+                        showAlert('Failed to import study history', 'danger');
+                    }
+                });
+            } catch (error) {
+                showAlert('Invalid file format. Please select a valid JSON file.', 'danger');
+            }
+        };
+        
+        reader.readAsText(file);
+    };
+    
+    input.click();
 }
 
 /**
@@ -170,7 +267,44 @@ function clearHistory() {
                 }
             })
             .catch(error => {
+                console.error('Error clearing history:', error);
                 showAlert('Failed to clear study history', 'danger');
             });
     }
+}
+
+/**
+ * Toggles dark mode for the application and saves the user's preference.
+ */
+function toggleDarkMode() {
+    const body = document.body;
+    body.classList.toggle('dark-mode');
+    
+    // Save preference in localStorage
+    if (body.classList.contains('dark-mode')) {
+        localStorage.setItem('darkMode', 'enabled');
+    } else {
+        localStorage.setItem('darkMode', 'disabled');
+    }
+}
+
+// --- Performance Utilities ---
+
+/**
+ * Creates a debounced function that delays invoking `func` until after `wait` milliseconds have elapsed
+ * since the last time the debounced function was invoked.
+ * @param {Function} func - The function to debounce.
+ * @param {number} wait - The number of milliseconds to delay.
+ * @returns {Function} The new debounced function.
+ */
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
 }

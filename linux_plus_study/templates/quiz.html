@@ -1,21 +1,17 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div id="focus-mode-prompt" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 9998; justify-content: center; align-items: center; text-align: center; flex-direction: column;">
-    <h3 class="text-white">Focus Mode Enabled</h3>
-    <p class="text-white-50">Click the button below to enter fullscreen for the quiz.</p>
-    <button class="btn btn-primary btn-lg mt-2" id="enter-focus-btn">Enter Focus Mode</button>
-</div>
-
 <div class="row">
     <div class="col-lg-10 mx-auto">
-        <div class="card bg-secondary">
+        <div id="quiz-card" class="card bg-secondary" style="display: none;">
             <div class="card-header">
                 <div class="row align-items-center">
                     <div class="col">
                         <h4 class="mb-0">Quiz Session</h4>
                         <small class="text-muted" id="category-display">Category: All</small>
                     </div>
+                    <div class="col-auto" id="timer-display-container">
+                        </div>
                     <div class="col-auto">
                         <span class="badge bg-info" id="question-counter">Question 1 of 10</span>
                     </div>
@@ -23,10 +19,7 @@
             </div>
             <div class="card-body">
                 <div id="question-container" class="mb-4">
-                    <div class="alert alert-info text-center">
-                        <h5>Loading question...</h5>
                     </div>
-                </div>
 
                 <div id="options-container" class="mb-4">
                     </div>
@@ -34,7 +27,7 @@
                 <div id="feedback-container" class="mb-3" style="display: none;">
                     </div>
 
-                <div class="d-flex justify-content-between">
+                <div id="quiz-controls" class="d-flex justify-content-between">
                     <button class="btn btn-outline-light" onclick="endQuiz()">End Quiz</button>
                     <div>
                         <button class="btn btn-success" id="submit-btn" onclick="submitAnswer()" disabled>Submit Answer</button>
@@ -42,6 +35,12 @@
                     </div>
                 </div>
             </div>
+        </div>
+
+        <div id="initial-state-container" class="text-center p-5 rounded bg-secondary">
+            <h5 id="initial-message">Loading Quiz...</h5>
+            <p id="initial-subtext"></p>
+            <button id="enter-focus-btn" class="btn btn-primary btn-lg" style="display: none;">Begin</button>
         </div>
     </div>
 </div>
@@ -58,6 +57,12 @@ let isSingleQuestionMode = false;
 // Load first question on page load
 document.addEventListener('DOMContentLoaded', function() {
     checkQuizStatus();
+
+    // Listen for fullscreen changes to restore UI
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
 });
 
 function checkQuizStatus() {
@@ -65,32 +70,50 @@ function checkQuizStatus() {
         .then(response => response.json())
         .then(data => {
             if (data.quiz_active) {
-                // Resume existing quiz
                 currentMode = data.quiz_mode || 'standard';
-                checkAndApplyFullscreen(); // Check if focus mode should be prompted
-                loadNextQuestion();
+                checkAndApplyFullscreen();
             } else {
-                // Show start message
-                showStartMessage();
+                showInitialMessage('No Active Quiz', 'Please start a quiz from the <a href="/">home page</a>.');
             }
         })
         .catch(error => {
             console.error('Error checking quiz status:', error);
-            showStartMessage();
+            showInitialMessage('Error', 'Could not check quiz status. Please <a href="/">try again</a>.');
         });
 }
 
-function showStartMessage() {
-    document.getElementById('question-container').innerHTML = `
-        <div class="alert alert-info text-center">
-            <h5>No Active Quiz</h5>
-            <p>Please start a quiz from the <a href="/">home page</a>.</p>
-        </div>
-    `;
-    document.getElementById('options-container').innerHTML = '';
-    document.getElementById('feedback-container').style.display = 'none';
-    document.querySelector('.d-flex.justify-content-between').style.display = 'none';
+function checkAndApplyFullscreen() {
+    fetch('/api/load_settings')
+        .then(response => response.json())
+        .then(settingsData => {
+            if (settingsData.success && settingsData.settings && settingsData.settings.focusMode) {
+                // Show focus mode prompt
+                document.getElementById('initial-state-container').style.display = 'block';
+                document.getElementById('quiz-card').style.display = 'none';
+                showInitialMessage('Focus Mode Enabled', 'The quiz will start in fullscreen. Are you ready?');
+                const focusBtn = document.getElementById('enter-focus-btn');
+                focusBtn.style.display = 'inline-block';
+                focusBtn.onclick = () => {
+                    enterQuizFullscreen();
+                    startQuiz();
+                };
+            } else {
+                // No focus mode, start quiz directly
+                startQuiz();
+            }
+        })
+        .catch(error => {
+            console.error('Error loading settings:', error);
+            startQuiz(); // Fallback to starting quiz directly
+        });
 }
+
+function startQuiz() {
+    document.getElementById('initial-state-container').style.display = 'none';
+    document.getElementById('quiz-card').style.display = 'block';
+    loadNextQuestion();
+}
+
 
 function loadNextQuestion() {
     fetch('/api/get_question')
@@ -100,20 +123,19 @@ function loadNextQuestion() {
                 showError(data.error);
                 return;
             }
-            
+
             if (data.quiz_complete) {
                 showQuizComplete();
                 return;
             }
-            
+
             currentQuestion = data;
             currentMode = data.mode || 'standard';
             isSingleQuestionMode = data.is_single_question || false;
-            
+
             displayQuestion(data);
-            updateStatus();
-            
-            // Start Quick Fire timer if needed
+
+            // Start Quick Fire timer if it's the right mode and not already running
             if (currentMode === 'quick_fire' && !quickFireTimer) {
                 startQuickFireTimer();
             }
@@ -128,8 +150,8 @@ function displayQuestion(data) {
     // Update header based on mode
     let headerText = 'Quiz Session';
     let categoryText = `Category: ${data.category}`;
-    
-    switch(currentMode) {
+
+    switch (currentMode) {
         case 'quick_fire':
             headerText = '⚡ Quick Fire Mode';
             categoryText = `${data.category} | Time Challenge!`;
@@ -148,22 +170,21 @@ function displayQuestion(data) {
             break;
         case 'verify':
             headerText = '🔍 Verify Knowledge';
-            categoryText = `${data.category} | Assessment Mode`;
+            categoryText = `Assessment Mode | ${data.category}`;
             break;
     }
-    
+
     document.querySelector('.card-header h4').textContent = headerText;
     document.getElementById('category-display').textContent = categoryText;
-    
+
     // Display question text
     document.getElementById('question-container').innerHTML = `
         <h5 class="text-warning">${data.question}</h5>
     `;
-    
+
     // Display question counter
-    let counterText = `Question ${data.question_number}`;
-    document.getElementById('question-counter').textContent = counterText;
-    
+    document.getElementById('question-counter').textContent = `Question ${data.question_number}`;
+
     // Display options
     let optionsHtml = '';
     data.options.forEach((option, index) => {
@@ -176,17 +197,17 @@ function displayQuestion(data) {
             </div>
         `;
     });
-    
     document.getElementById('options-container').innerHTML = optionsHtml;
-    
+
     // Reset controls
     document.getElementById('submit-btn').disabled = true;
-    document.getElementById('submit-btn').style.display = 'inline-block';  // Show submit button
+    document.getElementById('submit-btn').style.display = 'inline-block';
     document.getElementById('next-btn').style.display = 'none';
     document.getElementById('feedback-container').style.display = 'none';
-    document.querySelector('.d-flex.justify-content-between').style.display = 'flex';
+    document.getElementById('quiz-controls').style.display = 'flex';
     selectedAnswer = null;
 }
+
 
 function selectAnswer(index) {
     selectedAnswer = index;
@@ -195,59 +216,54 @@ function selectAnswer(index) {
 
 function submitAnswer() {
     if (selectedAnswer === null) return;
-    
+
     fetch('/api/submit_answer', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            answer_index: selectedAnswer
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                answer_index: selectedAnswer
+            })
         })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.error) {
-            showError(data.error);
-            return;
-        }
-        
-        showFeedback(data);
-        updateStatus();
-        
-        // Handle completion
-        if (data.session_complete || isSingleQuestionMode) {
-            clearInterval(quickFireTimer);
-            setTimeout(() => {
-                showQuizComplete(data);
-            }, isSingleQuestionMode ? 3000 : 2000);
-        }
-    })
-    .catch(error => {
-        console.error('Error submitting answer:', error);
-        showError('Failed to submit answer');
-    });
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                showError(data.error);
+                return;
+            }
+
+            showFeedback(data);
+
+            if (data.session_complete || isSingleQuestionMode) {
+                clearInterval(quickFireTimer);
+                setTimeout(() => {
+                    showQuizComplete(data);
+                }, isSingleQuestionMode ? 3000 : 2000); // Longer delay for single question feedback
+            }
+        })
+        .catch(error => {
+            console.error('Error submitting answer:', error);
+            showError('Failed to submit answer');
+        });
 }
 
 function showFeedback(data) {
     let feedbackClass = data.is_correct ? 'alert-success' : 'alert-danger';
     let feedbackText = '';
-    
-    // Handle verify mode differently
+
     if (currentMode === 'verify') {
         feedbackText = 'Answer recorded.';
         feedbackClass = 'alert-info';
     } else {
-        feedbackText = data.is_correct ? 
-            '✅ Correct!' : 
+        feedbackText = data.is_correct ?
+            '✅ Correct!' :
             `❌ Incorrect. The correct answer was: ${currentQuestion.options[data.correct_answer_index]}`;
-        
-        // Add mode-specific feedback
         if (currentMode === 'quick_fire') {
             feedbackText += data.is_correct ? ' Keep going! 🔥' : ' Keep pushing! ⚡';
         }
     }
-    
+
     let feedbackHtml = `
         <div class="alert ${feedbackClass}">
             <strong>${feedbackText}</strong>
@@ -255,7 +271,7 @@ function showFeedback(data) {
             ${data.points_earned ? `<br><small>Points earned: ${data.points_earned}</small>` : ''}
         </div>
     `;
-    
+
     if (data.new_badges && data.new_badges.length > 0) {
         feedbackHtml += `
             <div class="alert alert-info">
@@ -264,109 +280,62 @@ function showFeedback(data) {
             </div>
         `;
     }
-    
+
     document.getElementById('feedback-container').innerHTML = feedbackHtml;
     document.getElementById('feedback-container').style.display = 'block';
-    
-    // Disable all radio buttons
-    document.querySelectorAll('input[name="answer"]').forEach(input => {
-        input.disabled = true;
-    });
-    
-    // Hide submit button
+
+    document.querySelectorAll('input[name="answer"]').forEach(input => input.disabled = true);
     document.getElementById('submit-btn').style.display = 'none';
-    
-    // ALWAYS show next button for multi-question modes unless session is complete
+
     if (!isSingleQuestionMode && !data.session_complete) {
         document.getElementById('next-btn').style.display = 'inline-block';
         document.getElementById('next-btn').disabled = false;
-    } else if (data.session_complete || isSingleQuestionMode) {
-        // For completed sessions or single questions
-        setTimeout(() => {
-            showQuizComplete(data);
-        }, 2000);
     }
 }
+
 
 function nextQuestion() {
     loadNextQuestion();
 }
 
 function endQuiz() {
-    // Check if quiz is still active
-    fetch('/api/status')
-        .then(response => response.json())
-        .then(statusData => {
-            if (!statusData.quiz_active) {
-                // Quiz already ended, redirect to home
-                showAlert('Quiz session has already ended', 'info');
-                setTimeout(() => {
-                    window.location.href = '/';
-                }, 1500);
-                return;
-            }
-            
-            // Quiz is active, proceed with normal end confirmation
-            if (confirm('Are you sure you want to end the quiz?')) {
-                clearInterval(quickFireTimer);
-                fetch('/api/end_quiz', {
-                    method: 'POST'
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success || data.session_score !== undefined) {
-                        showQuizResults(data);
-                    } else {
-                        showError(data.error || 'Failed to end quiz');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error ending quiz:', error);
-                    showError('Failed to end quiz');
-                });
-            }
-        })
-        .catch(error => {
-            console.error('Error checking quiz status:', error);
-            // Fallback: still allow ending if status check fails
-            if (confirm('Are you sure you want to end the quiz?')) {
-                clearInterval(quickFireTimer);
-                fetch('/api/end_quiz', {
-                    method: 'POST'
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success || data.session_score !== undefined) {
-                        showQuizResults(data);
-                    } else {
-                        showError(data.error || 'Failed to end quiz');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error ending quiz:', error);
-                    showError('Failed to end quiz');
-                });
-            }
-        });
+    if (confirm('Are you sure you want to end the quiz?')) {
+        clearInterval(quickFireTimer);
+        fetch('/api/end_quiz', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showQuizResults(data);
+                } else {
+                    showError(data.error || 'Failed to end quiz');
+                }
+            })
+            .catch(error => {
+                console.error('Error ending quiz:', error);
+                showError('Failed to end quiz');
+            });
+    }
 }
 
 function showQuizComplete(data = null) {
     clearInterval(quickFireTimer);
-    
+
     if (data) {
         showQuizResults(data);
     } else {
         fetch('/api/end_quiz', {
-            method: 'POST'
-        })
-        .then(response => response.json())
-        .then(resData => {
-            showQuizResults(resData);
-        })
-        .catch(error => {
-            console.error('Error getting quiz results:', error);
-            showError('Failed to get quiz results');
-        });
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(resultsData => {
+                showQuizResults(resultsData);
+            })
+            .catch(error => {
+                console.error('Error getting quiz results:', error);
+                showError('Failed to get quiz results');
+            });
     }
 }
 
@@ -374,8 +343,8 @@ function showQuizResults(data) {
     exitQuizFullscreen();
     let modeTitle = 'Quiz Complete!';
     let modeEmoji = '🎉';
-    
-    switch(currentMode) {
+
+    switch (currentMode) {
         case 'quick_fire':
             modeTitle = 'Quick Fire Complete!';
             modeEmoji = '⚡';
@@ -389,41 +358,27 @@ function showQuizResults(data) {
             modeEmoji = '🔍';
             break;
     }
-    const accuracy = data.session_total > 0 ? (data.session_score / data.session_total * 100) : 0;
-    
-    let resultsHtml = `
+
+    const resultsHtml = `
         <div class="alert alert-info text-center">
             <h4>${modeEmoji} ${modeTitle}</h4>
-            <p>Final Score: ${data.session_score} / ${data.session_total} (${accuracy.toFixed(1)}%)</p>
-            <p>Points Earned: ${data.session_points || 0}</p>
+            <p>Final Score: ${data.session_score} / ${data.session_total} (${data.accuracy.toFixed(1)}%)</p>
+            <p>Points Earned: ${data.session_points}</p>
             <button class="btn btn-primary" onclick="window.location.href='/'">Return to Home</button>
         </div>
     `;
-    
+
     document.getElementById('question-container').innerHTML = resultsHtml;
     document.getElementById('options-container').innerHTML = '';
     document.getElementById('feedback-container').style.display = 'none';
-    const controls = document.querySelector('.d-flex.justify-content-between');
-    if (controls) controls.style.display = 'none';
-
-    // Disable End Quiz button
-    const endQuizBtn = document.querySelector('button[onclick="endQuiz()"]');
-    if (endQuizBtn) {
-        endQuizBtn.disabled = true;
-        endQuizBtn.textContent = 'Quiz Ended';
-    }
+    document.getElementById('quiz-controls').style.display = 'none';
 }
 
 
 function startQuickFireTimer() {
-    // Add timer display
-    const headerRow = document.querySelector('.card-header .row');
-    const timerCol = document.createElement('div');
-    timerCol.className = 'col-auto';
-    timerCol.id = 'timer-display';
-    timerCol.innerHTML = '<span class="badge bg-danger" id="timer-badge">3:00</span>';
-    headerRow.appendChild(timerCol);
-    
+    const timerContainer = document.getElementById('timer-display-container');
+    timerContainer.innerHTML = '<span class="badge bg-danger" id="timer-badge">3:00</span>';
+
     quickFireTimer = setInterval(() => {
         fetch('/api/quick_fire_status')
             .then(response => response.json())
@@ -432,27 +387,23 @@ function startQuickFireTimer() {
                     clearInterval(quickFireTimer);
                     return;
                 }
-                
+
+                if (data.should_end) {
+                    clearInterval(quickFireTimer);
+                    showQuizComplete();
+                    return;
+                }
+
                 const timeRemaining = Math.max(0, data.time_remaining || 0);
                 const minutes = Math.floor(timeRemaining / 60);
                 const seconds = Math.floor(timeRemaining % 60);
                 const timerBadge = document.getElementById('timer-badge');
-                
+
                 if (timerBadge) {
                     timerBadge.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-                    
-                    if (timeRemaining <= 30) {
-                        timerBadge.className = 'badge bg-danger';
-                    } else if (timeRemaining <= 60) {
-                        timerBadge.className = 'badge bg-warning';
-                    } else {
-                        timerBadge.className = 'badge bg-info';
-                    }
-                }
-                
-                if (data.should_end) {
-                    clearInterval(quickFireTimer);
-                    showQuizComplete();
+                    if (timeRemaining <= 30) timerBadge.className = 'badge bg-danger';
+                    else if (timeRemaining <= 60) timerBadge.className = 'badge bg-warning';
+                    else timerBadge.className = 'badge bg-info';
                 }
             })
             .catch(error => {
@@ -461,132 +412,55 @@ function startQuickFireTimer() {
     }, 1000);
 }
 
-function updateStatus() {
-    fetch('/api/status')
-        .then(response => response.json())
-        .then(data => {
-            document.getElementById('points-display').textContent = `Points: ${data.total_points}`;
-            document.getElementById('streak-display').textContent = `Streak: ${data.current_streak}`;
-        })
-        .catch(error => {
-            console.error('Error updating status:', error);
-        });
+function showInitialMessage(message, subtext) {
+    document.getElementById('initial-message').textContent = message;
+    document.getElementById('initial-subtext').innerHTML = subtext;
 }
 
 function showError(message) {
-    document.getElementById('question-container').innerHTML = `
+    exitQuizFullscreen();
+    document.getElementById('quiz-card').style.display = 'none';
+    const container = document.getElementById('initial-state-container');
+    container.style.display = 'block';
+    container.innerHTML = `
         <div class="alert alert-danger text-center">
             <h5>Error</h5>
             <p>${message}</p>
             <button class="btn btn-primary" onclick="window.location.href='/'">Return to Home</button>
-        </div>
-    `;
-    
-    document.getElementById('options-container').innerHTML = '';
-    document.getElementById('feedback-container').style.display = 'none';
-    document.querySelector('.d-flex.justify-content-between').style.display = 'none';
+        </div>`;
 }
+
+// --- Fullscreen and UI Functions ---
 function enterQuizFullscreen() {
-    try {
-        const elem = document.documentElement;
-        
-        if (elem.requestFullscreen) {
-            elem.requestFullscreen();
-        } else if (elem.mozRequestFullScreen) { // Firefox
-            elem.mozRequestFullScreen();
-        } else if (elem.webkitRequestFullscreen) { // Chrome, Safari
-            elem.webkitRequestFullscreen();
-        } else if (elem.msRequestFullscreen) { // IE/Edge
-            elem.msRequestFullscreen();
-        }
-        
-        // Hide navigation for true focus mode
-        const navbar = document.querySelector('.navbar');
-        const statusBar = document.querySelector('.fixed-bottom');
-        if (navbar) navbar.style.display = 'none';
-        if (statusBar) statusBar.style.display = 'none';
-        
-        console.log('Browser fullscreen activated for quiz');
-        
-    } catch (error) {
-        console.error('Fullscreen not supported:', error);
-        // Fallback: just hide navigation if fullscreen fails
-        const navbar = document.querySelector('.navbar');
-        const statusBar = document.querySelector('.fixed-bottom');
-        if (navbar) navbar.style.display = 'none';
-        if (statusBar) statusBar.style.display = 'none';
-    }
+    const elem = document.documentElement;
+    if (elem.requestFullscreen) elem.requestFullscreen();
+    else if (elem.mozRequestFullScreen) elem.mozRequestFullScreen();
+    else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
+    else if (elem.msRequestFullscreen) elem.msRequestFullscreen();
 }
 
 function exitQuizFullscreen() {
-    try {
-        if (document.exitFullscreen) {
-            document.exitFullscreen();
-        } else if (document.mozCancelFullScreen) {
-            document.mozCancelFullScreen();
-        } else if (document.webkitExitFullscreen) {
-            document.webkitExitFullscreen();
-        } else if (document.msExitFullscreen) {
-            document.msExitFullscreen();
-        }
-        
-        // Restore navigation
-        const navbar = document.querySelector('.navbar');
-        const statusBar = document.querySelector('.fixed-bottom');
-        if (navbar) navbar.style.display = '';
-        if (statusBar) statusBar.style.display = '';
-        
-        console.log('Exited quiz fullscreen');
-        
-    } catch (error) {
-        console.error('Exit fullscreen error:', error);
-        // Fallback: restore navigation even if fullscreen exit fails
-        const navbar = document.querySelector('.navbar');
-        const statusBar = document.querySelector('.fixed-bottom');
+    if (document.fullscreenElement || document.webkitFullscreenElement) {
+        if (document.exitFullscreen) document.exitFullscreen();
+        else if (document.mozCancelFullScreen) document.mozCancelFullScreen();
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        else if (document.msExitFullscreen) document.msExitFullscreen();
+    }
+}
+
+function handleFullscreenChange() {
+    const isFullscreen = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+    const navbar = document.querySelector('.navbar');
+    const statusBar = document.querySelector('.fixed-bottom'); // Assuming you have a status bar in base.html
+
+    if (isFullscreen) {
+        if (navbar) navbar.style.display = 'none';
+        if (statusBar) statusBar.style.display = 'none';
+    } else {
+        // User exited fullscreen (e.g., with Esc key)
         if (navbar) navbar.style.display = '';
         if (statusBar) statusBar.style.display = '';
     }
 }
-
-function checkAndApplyFullscreen() {
-    fetch('/api/load_settings')
-        .then(response => response.json())
-        .then(data => {
-            if (data.success && data.settings && data.settings.focusMode) {
-                const prompt = document.getElementById('focus-mode-prompt');
-                prompt.style.display = 'flex';
-                
-                document.getElementById('enter-focus-btn').onclick = function() {
-                    enterQuizFullscreen();
-                    prompt.style.display = 'none';
-                };
-            }
-        })
-        .catch(error => {
-            console.error('Error checking fullscreen setting:', error);
-        });
-}
-
-
-// Auto-exit fullscreen when user presses Escape or leaves fullscreen
-document.addEventListener('fullscreenchange', function() {
-    if (!document.fullscreenElement) {
-        // User exited fullscreen manually, restore UI
-        exitQuizFullscreen();
-    }
-});
-
-// Handle other browsers
-document.addEventListener('webkitfullscreenchange', function() {
-    if (!document.webkitFullscreenElement) {
-        exitQuizFullscreen();
-    }
-});
-
-document.addEventListener('mozfullscreenchange', function() {
-    if (!document.mozFullScreenElement) {
-        exitQuizFullscreen();
-    }
-});
 </script>
 {% endblock %}
