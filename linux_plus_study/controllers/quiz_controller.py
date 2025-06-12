@@ -56,6 +56,13 @@ class QuizController:
     def cache_current_question(self, question_data):
         """Cache the current question for repeated access."""
         self._current_question_cache = question_data
+    def clear_current_question_cache(self):
+        """Clear the cached current question."""
+        if hasattr(self, '_current_question_cache'):
+            delattr(self, '_current_question_cache')
+    def has_cached_question(self):
+        """Check if there's a cached current question."""
+        return hasattr(self, '_current_question_cache') and self._current_question_cache is not None
     
     def start_quiz_session(self, mode=QUIZ_MODE_STANDARD, category_filter=None):
         """
@@ -90,6 +97,12 @@ class QuizController:
             total_questions = min(MINI_QUIZ_QUESTIONS, self._get_available_questions_count(category_filter))
         else:
             total_questions = self._get_available_questions_count(category_filter)
+        
+        # Store category filter for later use
+        self.category_filter = category_filter
+        
+        # Clear any stale question cache
+        self.clear_current_question_cache()
         
         return {
             'mode': mode,
@@ -127,9 +140,6 @@ class QuizController:
         # Regular question selection
         question_data, original_index = self.game_state.select_question(category_filter)
         
-        if question_data is None:
-            self.quiz_active = False
-            return None
         if question_data is not None:
             result = {
                 'question_data': question_data,
@@ -138,18 +148,14 @@ class QuizController:
                 'streak': self.current_streak,
                 'quick_fire_remaining': self._get_quick_fire_remaining() if self.quick_fire_active else None
             }
-            self._current_question_cache = result
+            # Cache the current question
+            self.cache_current_question(result)
             return result
         
+        # No more questions available
+        self.quiz_active = False
         return None
-        
-        return {
-            'question_data': question_data,
-            'original_index': original_index,
-            'question_number': self.session_total + 1,
-            'streak': self.current_streak,
-            'quick_fire_remaining': self._get_quick_fire_remaining() if self.quick_fire_active else None
-        }
+    
     def get_session_status(self):
         """Get current session status information."""
         return {
@@ -162,30 +168,60 @@ class QuizController:
         }
 
     def force_end_session(self):
-        """Force end session without validation."""
-        if self.quiz_active:
-            self.quiz_active = False
-            if self.quick_fire_active:
-                self.quick_fire_active = False
-            
-            # Calculate final statistics without leaderboard update to avoid errors
-            accuracy = (self.session_score / self.session_total * 100) if self.session_total > 0 else 0
-            
-            # Save progress
-            self.game_state.save_history()
-            self.game_state.save_achievements()
-            
+        """Force end session and return final results."""
+        if not self.quiz_active:
             return {
-                'session_score': self.session_score,
-                'session_total': self.session_total,
-                'accuracy': accuracy,
-                'session_points': self.game_state.session_points,
-                'total_points': self.game_state.achievements.get('points_earned', 0),
-                'mode': self.current_quiz_mode,
-                'forced_end': True
+                'session_score': 0,
+                'session_total': 0,
+                'accuracy': 0.0,
+                'session_points': 0,
+                'message': 'No active session to end'
             }
-        return {'error': 'No active session'}
+        
+        # Calculate final results
+        accuracy = (self.session_score / self.session_total * 100) if self.session_total > 0 else 0.0
+        session_points = getattr(self.game_state, 'session_points', 0)
+        
+        # Store results before clearing
+        results = {
+            'session_score': self.session_score,
+            'session_total': self.session_total,
+            'accuracy': accuracy,
+            'session_points': session_points,
+            'quiz_mode': self.current_quiz_mode
+        }
+        
+        # Clear all session state
+        self.quiz_active = False
+        self.current_quiz_mode = QUIZ_MODE_STANDARD
+        self.session_score = 0
+        self.session_total = 0
+        self.session_answers = []
+        self.current_streak = 0
+        self.questions_since_break = 0
+        
+        # Clear quick fire state
+        if self.quick_fire_active:
+            self._end_quick_fire_mode()
+        
+        # Clear question cache
+        self.clear_current_question_cache()
+        
+        # Clear category filter
+        if hasattr(self, 'category_filter'):
+            delattr(self, 'category_filter')
+        
+        return results
     
+    def validate_session_state(self):
+        """Validate current session state and return status."""
+        if not self.quiz_active:
+            return {'valid': False, 'reason': 'No active session'}
+        
+        if not hasattr(self, 'current_quiz_mode') or self.current_quiz_mode is None:
+            return {'valid': False, 'reason': 'Invalid quiz mode'}
+        
+        return {'valid': True}
     def submit_answer(self, question_data, user_answer_index, original_index):
         """
         Process a submitted answer.

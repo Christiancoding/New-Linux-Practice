@@ -46,16 +46,6 @@ class LinuxPlusStudyWeb:
         
         self.quiz_controller = QuizController(game_state)
         self.stats_controller = StatsController(game_state)
-        self.quiz_active = False
-        self.current_streak = 0
-        self.current_quiz_mode = None
-        self.current_category_filter = None
-        self.current_question_data = None
-        self.current_question_index = -1
-        self.quick_fire_start_time = None
-        self.quick_fire_questions_answered = 0
-        self.last_daily_challenge_date = None
-        self.daily_challenge_completed = False
         
         self.setup_routes()
     # Add these methods to the LinuxPlusStudyWeb class after __init__
@@ -117,8 +107,8 @@ class LinuxPlusStudyWeb:
         
         @self.app.route('/api/status')
         def api_status():
-            """Get current game status."""
             try:
+                # Use quiz controller as single source of truth
                 status = self.quiz_controller.get_session_status()
                 return jsonify({
                     'quiz_active': status['quiz_active'],
@@ -152,7 +142,7 @@ class LinuxPlusStudyWeb:
                 quiz_mode = data.get('mode', 'standard')
                 category = data.get('category')
                 
-                # Force end any existing session
+                # Force end any existing session to ensure clean state
                 if self.quiz_controller.quiz_active:
                     self.quiz_controller.force_end_session()
                 
@@ -162,9 +152,6 @@ class LinuxPlusStudyWeb:
                 )
                 
                 if result.get('session_active'):
-                    self.current_quiz_mode = quiz_mode
-                    self.current_category_filter = result.get('category_filter')
-                    self.current_streak = 0
                     return jsonify({'success': True, **result})
                 else:
                     return jsonify({'success': False, 'error': 'Failed to start quiz session'})
@@ -176,17 +163,37 @@ class LinuxPlusStudyWeb:
         @self.app.route('/api/get_question')
         def api_get_question():
             try:
+                # Validate session state
                 if not self.quiz_controller.quiz_active:
                     return jsonify({'quiz_complete': True, 'error': 'No active quiz session'})
-                    
-                result = self.quiz_controller.get_next_question(self.current_category_filter)
+                
+                # Check if we have a cached current question first
+                cached_question = self.quiz_controller.get_current_question()
+                if cached_question:
+                    # Return cached question data
+                    q_text, options, _, category, _ = cached_question['question_data']
+                    return jsonify({
+                        'question': q_text,
+                        'options': options,
+                        'category': category,
+                        'question_number': cached_question.get('question_number', 1),
+                        'streak': cached_question.get('streak', 0),
+                        'mode': self.quiz_controller.current_quiz_mode,
+                        'is_single_question': self.quiz_controller.current_quiz_mode in ['daily_challenge', 'pop_quiz'],
+                        'quiz_complete': False,
+                        'quick_fire_remaining': cached_question.get('quick_fire_remaining'),
+                        'from_cache': True  # Debug flag
+                    })
+                
+                # Get new question
+                result = self.quiz_controller.get_next_question(
+                    self.quiz_controller.category_filter if hasattr(self.quiz_controller, 'category_filter') else None
+                )
                 
                 if result is None:
-                    return jsonify({'quiz_complete': True})
-                
-                # Store current question info
-                self.current_question_data = result['question_data']
-                self.current_question_index = result['original_index']
+                    # Session complete
+                    session_results = self.quiz_controller.force_end_session()
+                    return jsonify({'quiz_complete': True, **session_results})
                 
                 # Format response for web interface
                 q_text, options, _, category, _ = result['question_data']
@@ -200,11 +207,17 @@ class LinuxPlusStudyWeb:
                     'mode': self.quiz_controller.current_quiz_mode,
                     'is_single_question': self.quiz_controller.current_quiz_mode in ['daily_challenge', 'pop_quiz'],
                     'quiz_complete': False,
-                    'quick_fire_remaining': result.get('quick_fire_remaining')
+                    'quick_fire_remaining': result.get('quick_fire_remaining'),
+                    'from_cache': False  # Debug flag
                 })
                 
             except Exception as e:
                 print(f"Error in get_question: {e}")
+                # Force end session on error to prevent stuck state
+                try:
+                    self.quiz_controller.force_end_session()
+                except:
+                    pass
                 return jsonify({'error': str(e), 'quiz_complete': True})
 
         @self.app.route('/api/submit_answer', methods=['POST'])
@@ -213,23 +226,26 @@ class LinuxPlusStudyWeb:
                 data = request.get_json()
                 user_answer_index = data.get('answer_index')
                 
+                # Validate session and question state
                 if not self.quiz_controller.quiz_active:
                     return jsonify({'error': 'No active quiz session'})
-                    
-                if self.current_question_data is None:
-                    return jsonify({'error': 'No current question'})
+                
+                # Get current question from controller
+                current_question = self.quiz_controller.get_current_question()
+                if current_question is None:
+                    return jsonify({'error': 'No current question available'})
+                
+                question_data = current_question['question_data']
+                question_index = current_question['original_index']
                 
                 result = self.quiz_controller.submit_answer(
-                    self.current_question_data, 
+                    question_data, 
                     user_answer_index, 
-                    self.current_question_index
+                    question_index
                 )
                 
-                self.current_streak = result.get('streak', 0)
-                
-                # Clear current question after processing
-                self.current_question_data = None
-                self.current_question_index = -1
+                # Clear current question cache after processing
+                self.quiz_controller.clear_current_question_cache()
                 
                 return jsonify(result)
                 
@@ -244,13 +260,6 @@ class LinuxPlusStudyWeb:
                     return jsonify({'success': True, 'message': 'No active quiz session'})
                 
                 result = self.quiz_controller.force_end_session()
-                
-                # Reset web interface state
-                self.current_quiz_mode = None
-                self.current_category_filter = None
-                self.current_question_data = None
-                self.current_question_index = -1
-                self.current_streak = 0
                 
                 return jsonify({'success': True, **result})
                 

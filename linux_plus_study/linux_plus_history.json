@@ -255,7 +255,7 @@
     },
     "What is the primary function of the `mkinitrd` command?": {
       "correct": 0,
-      "attempts": 10,
+      "attempts": 11,
       "history": [
         {
           "timestamp": "2025-06-06T15:09:55.321148",
@@ -295,6 +295,10 @@
         },
         {
           "timestamp": "2025-06-11T23:20:53.909729",
+          "correct": false
+        },
+        {
+          "timestamp": "2025-06-11T23:50:15.328916",
           "correct": false
         }
       ]
@@ -423,7 +427,7 @@
   "categories": {
     "Commands (System Management)": {
       "correct": 10,
-      "attempts": 44
+      "attempts": 45
     },
     "Concepts & Terms (Containers)": {
       "correct": 0,
@@ -447,7 +451,7 @@
     }
   },
   "total_correct": 24,
-  "total_attempts": 88,
+  "total_attempts": 89,
   "incorrect_review": [
     "What is the primary function of the `mkinitrd` command?",
     "What is an AppImage?",
