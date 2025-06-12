@@ -49,30 +49,56 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function saveSettings() {
+    // Check if localStorage is available
+    if (typeof Storage === "undefined" || !localStorage) {
+        showAlert('Settings cannot be saved in this environment. Using session storage as fallback.', 'warning');
+        
+        // Fallback to sessionStorage or in-memory storage
+        try {
+            const settings = {
+                focusMode: document.getElementById('focusMode').checked,
+                breakReminder: parseInt(document.getElementById('breakReminder').value),
+                timestamp: Date.now()
+            };
+            
+            if (sessionStorage) {
+                sessionStorage.setItem('studySettings', JSON.stringify(settings));
+                showAlert('Settings saved for this session only!', 'info');
+            } else {
+                // Store in memory (will be lost on page refresh)
+                window.studySettings = settings;
+                showAlert('Settings saved temporarily (will reset on page refresh)', 'warning');
+            }
+        } catch (error) {
+            showAlert('Cannot save settings in this environment', 'danger');
+        }
+        return;
+    }
+    
     const settings = {
         focusMode: document.getElementById('focusMode').checked,
-        breakReminder: parseInt(document.getElementById('breakReminder').value)
+        breakReminder: parseInt(document.getElementById('breakReminder').value),
+        timestamp: Date.now()
     };
     
-    fetch('/api/save_settings', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(settings)
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            showAlert('Settings saved successfully!', 'success');
+    try {
+        // Test localStorage access first
+        localStorage.setItem('test_storage', 'test');
+        localStorage.removeItem('test_storage');
+        
+        // Save actual settings
+        localStorage.setItem('studySettings', JSON.stringify(settings));
+        showAlert('Settings saved successfully!', 'success');
+    } catch (error) {
+        console.error('Failed to save settings:', error);
+        if (error.name === 'QuotaExceededError') {
+            showAlert('Storage quota exceeded. Please clear browser data.', 'danger');
+        } else if (error.name === 'SecurityError') {
+            showAlert('Settings cannot be saved in private/incognito mode.', 'warning');
         } else {
-            showAlert('Failed to save settings: ' + (data.error || 'Unknown error'), 'danger');
+            showAlert('Failed to save settings: ' + error.message, 'danger');
         }
-    })
-    .catch(error => {
-        console.error('Error saving settings:', error);
-        showAlert('Failed to save settings', 'danger');
-    });
+    }
 }
 function toggleFullscreen() {
     const focusModeEnabled = document.getElementById('focusMode').checked;
@@ -84,84 +110,37 @@ function toggleFullscreen() {
     }
 }
 
-function enterFullscreen() {
-    try {
-        const elem = document.documentElement;
-        
-        if (elem.requestFullscreen) {
-            elem.requestFullscreen();
-        } else if (elem.mozRequestFullScreen) { // Firefox
-            elem.mozRequestFullScreen();
-        } else if (elem.webkitRequestFullscreen) { // Chrome, Safari
-            elem.webkitRequestFullscreen();
-        } else if (elem.msRequestFullscreen) { // IE/Edge
-            elem.msRequestFullscreen();
-        }
-        
-        // Hide navigation for true focus mode
-        const navbar = document.querySelector('.navbar');
-        const statusBar = document.querySelector('.fixed-bottom');
-        if (navbar) navbar.style.display = 'none';
-        if (statusBar) statusBar.style.display = 'none';
-        
-    } catch (error) {
-        console.error('Fullscreen not supported:', error);
-        showAlert('Fullscreen mode not supported in this environment', 'warning');
-    }
-}
-
-function exitFullscreen() {
-    try {
-        if (document.exitFullscreen) {
-            document.exitFullscreen();
-        } else if (document.mozCancelFullScreen) {
-            document.mozCancelFullScreen();
-        } else if (document.webkitExitFullscreen) {
-            document.webkitExitFullscreen();
-        } else if (document.msExitFullscreen) {
-            document.msExitFullscreen();
-        }
-        
-        // Restore navigation
-        const navbar = document.querySelector('.navbar');
-        const statusBar = document.querySelector('.fixed-bottom');
-        if (navbar) navbar.style.display = '';
-        if (statusBar) statusBar.style.display = '';
-        
-    } catch (error) {
-        console.error('Exit fullscreen error:', error);
-    }
-}
-
-// Auto-apply fullscreen when settings are loaded
-function applyLoadedSettings() {
-    loadSettings();
-    
-    // Apply fullscreen if enabled
-    const focusModeEnabled = document.getElementById('focusMode').checked;
-    if (focusModeEnabled) {
-        // Delay to ensure page is fully loaded
-        setTimeout(() => {
-            enterFullscreen();
-        }, 500);
-    }
-}
-
 function loadSettings() {
-    fetch('/api/load_settings')
-        .then(response => response.json())
-        .then(data => {
-            if (data.success && data.settings) {
-                document.getElementById('focusMode').checked = data.settings.focusMode || false;
-                document.getElementById('breakReminder').value = data.settings.breakReminder || 10;
+    try {
+        let settings = {};
+        
+        // Try localStorage first
+        if (localStorage && localStorage.getItem) {
+            const settingsStr = localStorage.getItem('studySettings');
+            if (settingsStr) {
+                settings = JSON.parse(settingsStr);
             }
-        })
-        .catch(error => {
-            console.error('Error loading settings:', error);
-            // Use defaults
-            document.getElementById('focusMode').checked = false;
-            document.getElementById('breakReminder').value = 10;
-        });
+        }
+        // Fallback to sessionStorage
+        else if (sessionStorage && sessionStorage.getItem) {
+            const settingsStr = sessionStorage.getItem('studySettings');
+            if (settingsStr) {
+                settings = JSON.parse(settingsStr);
+            }
+        }
+        // Fallback to in-memory
+        else if (window.studySettings) {
+            settings = window.studySettings;
+        }
+        
+        document.getElementById('focusMode').checked = settings.focusMode || false;
+        document.getElementById('breakReminder').value = settings.breakReminder || 10;
+    } catch (error) {
+        console.error('Failed to load settings:', error);
+        // Use defaults
+        document.getElementById('focusMode').checked = false;
+        document.getElementById('breakReminder').value = 10;
+    }
 }
 
 function exportHistory() {
