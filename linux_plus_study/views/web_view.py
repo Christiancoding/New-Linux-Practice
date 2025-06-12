@@ -46,6 +46,9 @@ class LinuxPlusStudyWeb:
         
         self.quiz_controller = QuizController(game_state)
         self.stats_controller = StatsController(game_state)
+        self.current_category_filter = None
+        self.current_question_data = None
+        self.current_question_index = -1
         
         self.setup_routes()
     def _should_show_break_reminder(self):
@@ -172,14 +175,20 @@ class LinuxPlusStudyWeb:
                 quiz_mode = data.get('mode', 'standard')
                 category = data.get('category')
                 
+                # Normalize category filter
+                category_filter = None if category == "All Categories" else category
+                
                 # Force end any existing session to ensure clean state
                 if self.quiz_controller.quiz_active:
                     self.quiz_controller.force_end_session()
                 
                 result = self.quiz_controller.start_quiz_session(
                     mode=quiz_mode,
-                    category_filter=None if category == "All Categories" else category
+                    category_filter=category_filter
                 )
+                
+                # Store category filter in web interface for consistency
+                self.current_category_filter = category_filter
                 
                 if result.get('session_active'):
                     return jsonify({'success': True, **result})
@@ -196,20 +205,43 @@ class LinuxPlusStudyWeb:
                 if not self.quiz_controller.quiz_active:
                     return jsonify({'quiz_complete': True, 'error': 'No active quiz session'})
                 
-                # Check for break reminder before getting next question
+                # Check for break reminder before getting question
                 if self._should_show_break_reminder():
                     return jsonify({
                         'break_reminder': True,
                         'questions_since_break': self.quiz_controller.questions_since_break,
                         'break_interval': self._get_break_interval()
                     })
+                
+                # First, check if there's already a current question (e.g., when returning to quiz tab)
+                current_question = self.quiz_controller.get_current_question()
+                
+                if current_question is not None:
+                    # Return the existing current question
+                    question_data = current_question['question_data']
+                    q_text, options, _, category, _ = question_data
                     
-                result = self.quiz_controller.get_next_question(self.current_category_filter)
+                    return jsonify({
+                        'question': q_text,
+                        'options': options,
+                        'category': category,
+                        'question_number': current_question.get('question_number', 1),
+                        'streak': current_question.get('streak', 0),
+                        'mode': self.quiz_controller.current_quiz_mode,
+                        'is_single_question': self.quiz_controller.current_quiz_mode in ['daily_challenge', 'pop_quiz'],
+                        'quiz_complete': False,
+                        'quick_fire_remaining': current_question.get('quick_fire_remaining'),
+                        'break_reminder': False,
+                        'returning_to_question': True  # Flag to indicate this is not a new question
+                    })
+                
+                # No current question, so get the next one
+                result = self.quiz_controller.get_next_question(self.quiz_controller.category_filter)
                 
                 if result is None:
                     return jsonify({'quiz_complete': True})
                 
-                # Store current question info
+                # Store current question info (this is cached automatically by get_next_question)
                 self.current_question_data = result['question_data']
                 self.current_question_index = result['original_index']
                 
@@ -226,7 +258,8 @@ class LinuxPlusStudyWeb:
                     'is_single_question': self.quiz_controller.current_quiz_mode in ['daily_challenge', 'pop_quiz'],
                     'quiz_complete': False,
                     'quick_fire_remaining': result.get('quick_fire_remaining'),
-                    'break_reminder': False
+                    'break_reminder': False,
+                    'returning_to_question': False  # Flag to indicate this is a new question
                 })
                 
             except Exception as e:

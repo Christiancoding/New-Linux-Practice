@@ -202,7 +202,7 @@ class QuizController:
         
         # Clear quick fire state
         if self.quick_fire_active:
-            self._end_quick_fire_mode()
+            self.end_quick_fire_mode()
         
         # Clear question cache
         self.clear_current_question_cache()
