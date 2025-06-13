@@ -16,6 +16,8 @@ import time
 import logging
 import traceback
 from utils.cli_playground import get_cli_playground
+import subprocess
+import shlex
 from utils.config import (
     QUICK_FIRE_QUESTIONS, QUICK_FIRE_TIME_LIMIT, MINI_QUIZ_QUESTIONS,
     POINTS_PER_CORRECT, POINTS_PER_INCORRECT, STREAK_BONUS_THRESHOLD, STREAK_BONUS_MULTIPLIER
@@ -37,6 +39,7 @@ class LinuxPlusStudyWeb:
         # Add caching to reduce lag
         self.app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 300  # Cache static files for 5 minutes
         self.app.config['TEMPLATES_AUTO_RELOAD'] = False  # Disable template auto-reload in production
+        self.setup_cli_playground_routes(self.app)
         
         # Session configuration for better performance
         self.app.secret_key = 'your-secret-key-here'  # Add a proper secret key
@@ -106,6 +109,175 @@ class LinuxPlusStudyWeb:
             return {'success': False, 'fullscreen': False}
         except Exception as e:
             return {'success': False, 'error': str(e)}
+    def setup_cli_playground_routes(self, app):
+        """Setup CLI playground API routes"""
+        
+        # Store command history in memory (you could also use a file)
+        self.cli_history = []
+        
+        @app.route('/api/cli/execute', methods=['POST'])
+        def execute_cli_command():
+            try:
+                data = request.get_json()
+                command = data.get('command', '').strip()
+                
+                if not command:
+                    return jsonify({'success': False, 'error': 'No command provided'})
+                
+                # Add to history
+                self.cli_history.append(command)
+                
+                # Handle built-in commands
+                if command == 'clear':
+                    return jsonify({'success': True, 'output': 'CLEAR_SCREEN'})
+                
+                if command == 'help':
+                    help_text = self._get_help_text()
+                    return jsonify({'success': True, 'output': help_text})
+                
+                # Handle simulated file system commands
+                output = self._simulate_command(command)
+                if output is not None:
+                    return jsonify({'success': True, 'output': output})
+                
+                # For real system commands (restricted set)
+                allowed_commands = ['ls', 'pwd', 'whoami', 'date', 'echo', 'cat', 'grep', 'find', 'wc', 'head', 'tail']
+                cmd_parts = shlex.split(command)
+                
+                if not cmd_parts or cmd_parts[0] not in allowed_commands:
+                    return jsonify({
+                        'success': False, 
+                        'error': f'Command "{cmd_parts[0] if cmd_parts else command}" not available in this sandbox environment.\nType "help" to see available commands.'
+                    })
+                
+                # Execute safe commands with timeout
+                try:
+                    result = subprocess.run(
+                        command, 
+                        shell=True, 
+                        capture_output=True, 
+                        text=True, 
+                        timeout=5,
+                        cwd='/tmp'  # Safe directory
+                    )
+                    
+                    output = result.stdout
+                    error = result.stderr
+                    
+                    if result.returncode == 0:
+                        return jsonify({'success': True, 'output': output or 'Command executed successfully'})
+                    else:
+                        return jsonify({'success': False, 'error': error or f'Command failed with return code {result.returncode}'})
+                        
+                except subprocess.TimeoutExpired:
+                    return jsonify({'success': False, 'error': 'Command timed out (5 second limit)'})
+                except Exception as e:
+                    return jsonify({'success': False, 'error': f'Execution error: {str(e)}'})
+                    
+            except Exception as e:
+                return jsonify({'success': False, 'error': f'Server error: {str(e)}'})
+        
+        @app.route('/api/cli/history', methods=['GET'])
+        def get_cli_history():
+            """Get command history"""
+            return jsonify({'success': True, 'history': self.cli_history})
+    def _simulate_command(self, command):
+        """Simulate common commands with educational examples"""
+        
+        # Create sample files content
+        sample_files = {
+            'sample.txt': 'Hello Linux Plus student!\nThis is a sample text file.\nPractice your command line skills here.\nGood luck with your certification!',
+            'log.txt': 'INFO: System started\nERROR: Failed to connect\nINFO: Retrying connection\nWARNING: Low disk space\nINFO: Connection established',
+            'data.csv': 'name,age,city\nJohn,25,New York\nJane,30,Los Angeles\nBob,35,Chicago',
+            'config.conf': '[database]\nhost=localhost\nport=5432\nname=mydb\n\n[logging]\nlevel=INFO\nfile=/var/log/app.log'
+        }
+        
+        cmd_parts = command.split()
+        if not cmd_parts:
+            return None
+        
+        base_cmd = cmd_parts[0]
+        
+        # Simulate ls command
+        if base_cmd == 'ls':
+            if len(cmd_parts) == 1:
+                return 'sample.txt  log.txt  data.csv  config.conf  docs/  scripts/'
+            else:
+                return 'sample.txt  log.txt  data.csv  config.conf'
+        
+        # Simulate cat command
+        elif base_cmd == 'cat' and len(cmd_parts) > 1:
+            filename = cmd_parts[1]
+            if filename in sample_files:
+                return sample_files[filename]
+            else:
+                return f'cat: {filename}: No such file or directory'
+        
+        # Simulate grep command
+        elif base_cmd == 'grep' and len(cmd_parts) >= 3:
+            pattern = cmd_parts[1].strip('"\'')
+            filename = cmd_parts[2]
+            if filename in sample_files:
+                lines = sample_files[filename].split('\n')
+                matches = [line for line in lines if pattern.lower() in line.lower()]
+                return '\n'.join(matches) if matches else f'grep: no matches found for "{pattern}"'
+            else:
+                return f'grep: {filename}: No such file or directory'
+        
+        # Simulate wc command
+        elif base_cmd == 'wc' and len(cmd_parts) > 1:
+            filename = cmd_parts[1]
+            if filename in sample_files:
+                content = sample_files[filename]
+                lines = len(content.split('\n'))
+                words = len(content.split())
+                chars = len(content)
+                return f'{lines:8} {words:8} {chars:8} {filename}'
+            else:
+                return f'wc: {filename}: No such file or directory'
+        
+        return None  # Command not simulated, try real execution
+
+    def _get_help_text(self):
+        """Get comprehensive help text"""
+        return """Linux Plus CLI Playground - Available Commands:
+
+    FILE OPERATIONS:
+    ls                    - List files and directories
+    cat <file>           - Display file contents
+    head <file>          - Show first 10 lines of file
+    tail <file>          - Show last 10 lines of file
+
+    TEXT PROCESSING:
+    grep <pattern> <file> - Search for pattern in file
+    wc <file>            - Count lines, words, and characters
+
+    SYSTEM INFO:
+    pwd                  - Show current directory path
+    whoami              - Display current username
+    date                - Show current date and time
+
+    UTILITIES:
+    echo "text"         - Display text
+    find . -name "*.txt" - Find files by pattern
+    clear               - Clear terminal screen
+    help                - Show this help message
+
+    SAMPLE FILES AVAILABLE:
+    sample.txt          - Basic text file
+    log.txt             - Log file with different message types
+    data.csv            - CSV data file
+    config.conf         - Configuration file
+
+    EXAMPLES:
+    cat sample.txt              - View sample file
+    grep "ERROR" log.txt        - Find error messages
+    wc data.csv                 - Count lines in CSV
+    echo "Hello World"          - Print text
+    find . -name "*.txt"        - Find all .txt files
+
+    This is a safe educational environment. Not all Linux commands are available.
+    Type commands above to practice Linux command line skills!"""
     def reset_quiz_state(self):
         """Reset quiz state variables."""
         self.quiz_active = False
@@ -172,42 +344,12 @@ class LinuxPlusStudyWeb:
                     'quiz_mode': None,
                     'error': str(e)
                 })
-        @self. app.route('/cli-playground')
+        @self.app.route('/cli-playground')
         def cli_playground_page():
             """CLI Playground page"""
             return render_template('cli_playground.html', 
                                 title='CLI Playground',
                                 active_page='cli_playground')
-
-        @self.app.route('/api/cli/execute', methods=['POST'])
-        def execute_cli_command():
-            """Execute CLI command via AJAX"""
-            try:
-                data = request.get_json()
-                command = data.get('command', '').strip()
-                
-                if not command:
-                    return jsonify({
-                        'success': False,
-                        'error': 'No command provided'
-                    })
-                
-                # Execute command in playground
-                result = cli_playground.execute_command(command)
-                
-                return jsonify({
-                    'success': True,
-                    'output': result['output'],
-                    'error': result['error'],
-                    'status': result['status'],
-                    'command': result['command']
-                })
-                
-            except Exception as e:
-                return jsonify({
-                    'success': False,
-                    'error': f'Server error: {str(e)}'
-                })
 
         @self.app.route('/api/cli/clear', methods=['POST'])
         def clear_cli_history():
@@ -226,24 +368,6 @@ class LinuxPlusStudyWeb:
                     'success': False,
                     'error': f'Server error: {str(e)}'
                 })
-
-        @self.app.route('/api/cli/history', methods=['GET'])
-        def get_cli_history():
-            """Get CLI command history"""
-            try:
-                history = cli_playground.command_history[-50:]  # Last 50 commands
-                
-                return jsonify({
-                    'success': True,
-                    'history': history
-                })
-                
-            except Exception as e:
-                return jsonify({
-                    'success': False,
-                    'error': f'Server error: {str(e)}'
-                })
-
         @self.app.route('/api/cli/commands', methods=['GET'])
         def get_available_commands():
             """Get list of available CLI commands"""
