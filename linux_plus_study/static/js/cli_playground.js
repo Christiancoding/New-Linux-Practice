@@ -1,3 +1,8 @@
+/**
+ * CLI Playground JavaScript Module
+ * Provides interactive command-line interface functionality
+ */
+
 class CLIPlayground {
     constructor() {
         this.commandHistory = [];
@@ -74,44 +79,63 @@ class CLIPlayground {
             case 'Escape':
                 e.preventDefault();
                 input.value = '';
-                this.hideSuggestions();
+                this.historyIndex = this.commandHistory.length;
                 break;
         }
     }
     
     handleInput(e) {
-        const input = e.target.value;
-        this.showSuggestions(input);
+        // Reset history index when user types
+        this.historyIndex = this.commandHistory.length;
+    }
+    
+    handleTabCompletion() {
+        const input = document.getElementById('cliInput');
+        const currentValue = input.value.trim();
+        
+        if (!currentValue) return;
+        
+        const matches = this.suggestions.filter(cmd => 
+            cmd.toLowerCase().startsWith(currentValue.toLowerCase())
+        );
+        
+        if (matches.length === 1) {
+            input.value = matches[0];
+        } else if (matches.length > 1) {
+            this.addToTerminal(`Available completions: ${matches.join(', ')}`, 'result');
+            this.scrollToBottom();
+        }
     }
     
     executeCommand() {
-        if (this.isProcessing) return;
-        
         const input = document.getElementById('cliInput');
         const command = input.value.trim();
         
-        if (!command) return;
+        if (!command || this.isProcessing) return;
         
-        this.isProcessing = true;
-        this.commandHistory.push(command);
-        this.historyIndex = this.commandHistory.length;
-        
-        // Display command
+        // Add command to display
         this.addToTerminal(`student@linux-study:~/sandbox$ ${command}`, 'command');
-        this.showLoading(true);
+        
+        // Add to history
+        if (command !== this.commandHistory[this.commandHistory.length - 1]) {
+            this.commandHistory.push(command);
+        }
+        this.historyIndex = this.commandHistory.length;
         
         // Clear input
         input.value = '';
-        this.hideSuggestions();
         
         // Execute command
-        this.callAPI('/api/cli/execute', 'POST', { command })
+        this.processCommand(command);
+    }
+    
+    processCommand(command) {
+        this.isProcessing = true;
+        this.showLoading(true);
+        
+        this.callAPI('/api/cli/execute', 'POST', { command: command })
             .then(data => {
-                if (data.success) {
-                    this.handleCommandResult(data);
-                } else {
-                    this.addToTerminal(data.error || 'Unknown error occurred', 'error');
-                }
+                this.handleCommandResult(data);
             })
             .catch(error => {
                 this.addToTerminal(`Network error: ${error.message}`, 'error');
@@ -161,16 +185,17 @@ class CLIPlayground {
     formatOutput(text, type) {
         // Basic syntax highlighting for file listings
         if (type === 'result' && text.includes('  ')) {
-            // Possible ls output
-            return text.replace(/(\S+\.(txt|csv|md|log|json))/g, '<span class="cli-file-highlight">$1</span>');
+            // Possible ls output - highlight file extensions
+            return text.replace(/(\S+\.\w+)/g, '<span style="color: #ffaa00;">$1</span>');
         }
         
-        // Escape HTML
-        return text.replace(/&/g, '&amp;')
-                  .replace(/</g, '&lt;')
-                  .replace(/>/g, '&gt;')
-                  .replace(/"/g, '&quot;')
-                  .replace(/'/g, '&#039;');
+        // Escape HTML to prevent injection
+        return text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+    
+    addWelcomeMessage() {
+        // Welcome message is already in the HTML template
+        this.scrollToBottom();
     }
     
     navigateHistory(direction) {
@@ -188,46 +213,6 @@ class CLIPlayground {
                 input.value = '';
             }
         }
-        
-        // Move cursor to end
-        input.setSelectionRange(input.value.length, input.value.length);
-    }
-    
-    handleTabCompletion() {
-        const input = document.getElementById('cliInput');
-        const currentValue = input.value;
-        const words = currentValue.split(' ');
-        const lastWord = words[words.length - 1];
-        
-        // Simple command completion
-        const matches = this.suggestions.filter(cmd => 
-            cmd.toLowerCase().startsWith(lastWord.toLowerCase())
-        );
-        
-        if (matches.length === 1) {
-            words[words.length - 1] = matches[0];
-            input.value = words.join(' ');
-        } else if (matches.length > 1) {
-            this.addToTerminal(`Possible completions: ${matches.join(', ')}`, 'result');
-            this.scrollToBottom();
-        }
-    }
-    
-    showSuggestions(input) {
-        // Simple suggestion system
-        if (input.length > 0) {
-            const matches = this.suggestions.filter(cmd => 
-                cmd.toLowerCase().startsWith(input.toLowerCase())
-            );
-            
-            if (matches.length > 0 && matches.length < 6) {
-                // Could implement suggestion dropdown here
-            }
-        }
-    }
-    
-    hideSuggestions() {
-        // Hide any suggestion UI
     }
     
     clearTerminal() {
@@ -235,13 +220,9 @@ class CLIPlayground {
         const outputs = terminal.querySelectorAll('.cli-output');
         outputs.forEach(output => output.remove());
         
-        this.addWelcomeMessage();
-        this.focusInput();
-    }
-    
-    addWelcomeMessage() {
+        // Add welcome message back
         this.addToTerminal('Terminal cleared.', 'result');
-        this.addToTerminal('Type "help" to see available commands.', 'result');
+        this.focusInput();
     }
     
     showHistory() {
@@ -277,7 +258,10 @@ class CLIPlayground {
                 if (data.success) {
                     this.commandHistory = [];
                     this.historyIndex = -1;
-                    document.getElementById('historyContent').innerHTML = '<em>History cleared</em>';
+                    const historyContent = document.getElementById('historyContent');
+                    if (historyContent) {
+                        historyContent.innerHTML = '<em>History cleared</em>';
+                    }
                     this.addToTerminal('Command history cleared.', 'result');
                 }
             })
@@ -322,14 +306,18 @@ class CLIPlayground {
     
     insertCommand(command) {
         const input = document.getElementById('cliInput');
-        input.value = command;
-        this.focusInput();
+        if (input) {
+            input.value = command;
+            this.focusInput();
+        }
     }
     
     executeCommandDirect(command) {
         const input = document.getElementById('cliInput');
-        input.value = command;
-        this.executeCommand();
+        if (input) {
+            input.value = command;
+            this.executeCommand();
+        }
     }
     
     showHelp() {
@@ -369,22 +357,48 @@ class CLIPlayground {
             options.body = JSON.stringify(data);
         }
         
-        const response = await fetch(url, options);
-        return await response.json();
+        try {
+            const response = await fetch(url, options);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return await response.json();
+        } catch (error) {
+            console.error('API call failed:', error);
+            throw error;
+        }
     }
 }
 
 // Global functions for backward compatibility
-function clearTerminal() { if (window.cliPlayground) window.cliPlayground.clearTerminal(); }
-function showHistory() { if (window.cliPlayground) window.cliPlayground.showHistory(); }
-function showHelp() { if (window.cliPlayground) window.cliPlayground.showHelp(); }
-function resetPlayground() { if (window.cliPlayground) window.cliPlayground.resetPlayground(); }
-function clearHistory() { if (window.cliPlayground) window.cliPlayground.clearHistory(); }
-function insertCommand(cmd) { if (window.cliPlayground) window.cliPlayground.insertCommand(cmd); }
+function clearTerminal() { 
+    if (window.cliPlayground) window.cliPlayground.clearTerminal(); 
+}
+
+function showHistory() { 
+    if (window.cliPlayground) window.cliPlayground.showHistory(); 
+}
+
+function showHelp() { 
+    if (window.cliPlayground) window.cliPlayground.showHelp(); 
+}
+
+function resetPlayground() { 
+    if (window.cliPlayground) window.cliPlayground.resetPlayground(); 
+}
+
+function clearHistory() { 
+    if (window.cliPlayground) window.cliPlayground.clearHistory(); 
+}
+
+function insertCommand(cmd) { 
+    if (window.cliPlayground) window.cliPlayground.insertCommand(cmd); 
+}
 
 // Initialize CLI Playground when DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
     if (document.getElementById('cliTerminal')) {
         window.cliPlayground = new CLIPlayground();
+        console.log('CLI Playground initialized');
     }
 });

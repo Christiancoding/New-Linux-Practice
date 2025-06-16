@@ -1,4 +1,3 @@
-<!-- templates/cli_playground.html -->
 {% extends "base.html" %}
 
 {% block extra_css %}
@@ -21,6 +20,31 @@
     justify-content: space-between;
     align-items: center;
     border-bottom: 1px solid #555;
+}
+
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    background: #00ff00;
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+.loading-indicator {
+    display: none;
+    color: #ffc107;
 }
 
 .cli-terminal {
@@ -108,6 +132,14 @@
     background: #444;
 }
 
+.cli-tutorial {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
 .cli-help-panel {
     background: #f8f9fa;
     border: 1px solid #dee2e6;
@@ -126,59 +158,30 @@
 .command-item {
     background: #fff;
     border: 1px solid #ddd;
-    border-radius: 4px;
-    padding: 10px;
+    border-radius: 6px;
+    padding: 12px;
     cursor: pointer;
-    transition: background 0.3s;
+    transition: all 0.3s ease;
 }
 
 .command-item:hover {
-    background: #f5f5f5;
+    background: #f0f8ff;
+    border-color: #007bff;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 123, 255, 0.2);
 }
 
 .command-name {
+    font-family: 'Courier New', monospace;
     font-weight: bold;
     color: #007bff;
-    font-family: 'Courier New', monospace;
+    margin-bottom: 5px;
 }
 
 .command-desc {
     font-size: 12px;
     color: #666;
-    margin-top: 5px;
-}
-
-.cli-tutorial {
-    background: #e7f3ff;
-    border-left: 4px solid #007bff;
-    padding: 15px;
-    margin: 20px 0;
-    border-radius: 0 4px 4px 0;
-}
-
-.loading-indicator {
-    display: none;
-    color: #ffaa00;
-}
-
-.status-indicator {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #00ff00;
-    animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-    0% { opacity: 1; }
-    50% { opacity: 0.5; }
-    100% { opacity: 1; }
+    line-height: 1.3;
 }
 </style>
 {% endblock %}
@@ -287,231 +290,5 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
-let commandHistory = [];
-let historyIndex = -1;
-
-// Initialize CLI Playground
-document.addEventListener('DOMContentLoaded', function() {
-    loadAvailableCommands();
-    focusInput();
-    
-    // Handle enter key in input
-    document.getElementById('cliInput').addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') {
-            executeCommand();
-        } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            navigateHistory('up');
-        } else if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            navigateHistory('down');
-        }
-    });
-    
-    // Keep input focused
-    document.getElementById('cliTerminal').addEventListener('click', function() {
-        focusInput();
-    });
-});
-
-function focusInput() {
-    document.getElementById('cliInput').focus();
-}
-
-function executeCommand() {
-    const input = document.getElementById('cliInput');
-    const command = input.value.trim();
-    
-    if (!command) return;
-    
-    // Add to local history
-    commandHistory.push(command);
-    historyIndex = commandHistory.length;
-    
-    // Display command in terminal
-    addToTerminal(command, 'command');
-    
-    // Show loading
-    showLoading(true);
-    
-    // Clear input
-    input.value = '';
-    
-    // Execute command
-    fetch('/api/cli/execute', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ command: command })
-    })
-    .then(response => response.json())
-    .then(data => {
-        showLoading(false);
-        
-        if (data.success) {
-            if (data.output === 'CLEAR_SCREEN') {
-                clearTerminal();
-            } else {
-                if (data.output) {
-                    addToTerminal(data.output, 'result');
-                }
-                if (data.error) {
-                    addToTerminal(data.error, 'error');
-                }
-            }
-        } else {
-            addToTerminal(data.error || 'Unknown error occurred', 'error');
-        }
-        
-        scrollToBottom();
-        focusInput();
-    })
-    .catch(error => {
-        showLoading(false);
-        addToTerminal('Network error: ' + error.message, 'error');
-        scrollToBottom();
-        focusInput();
-    });
-}
-
-function addToTerminal(text, type) {
-    const terminal = document.getElementById('cliTerminal');
-    const inputLine = terminal.querySelector('.cli-input-line');
-    
-    const output = document.createElement('div');
-    output.className = 'cli-output';
-    
-    if (type === 'command') {
-        output.innerHTML = `<div class="cli-command">student@linux-study:~/sandbox$ ${text}</div>`;
-    } else if (type === 'error') {
-        output.innerHTML = `<div class="cli-error">${text}</div>`;
-    } else {
-        output.innerHTML = `<div class="cli-result">${text}</div>`;
-    }
-    
-    terminal.insertBefore(output, inputLine);
-}
-
-function scrollToBottom() {
-    const terminal = document.getElementById('cliTerminal');
-    terminal.scrollTop = terminal.scrollHeight;
-}
-
-function showLoading(show) {
-    const indicator = document.getElementById('loadingIndicator');
-    indicator.style.display = show ? 'block' : 'none';
-}
-
-function clearTerminal() {
-    const terminal = document.getElementById('cliTerminal');
-    const outputs = terminal.querySelectorAll('.cli-output');
-    outputs.forEach(output => output.remove());
-    
-    // Add welcome message back
-    addToTerminal('Terminal cleared.', 'result');
-    focusInput();
-}
-
-function navigateHistory(direction) {
-    const input = document.getElementById('cliInput');
-    
-    if (direction === 'up' && historyIndex > 0) {
-        historyIndex--;
-        input.value = commandHistory[historyIndex];
-    } else if (direction === 'down') {
-        if (historyIndex < commandHistory.length - 1) {
-            historyIndex++;
-            input.value = commandHistory[historyIndex];
-        } else {
-            historyIndex = commandHistory.length;
-            input.value = '';
-        }
-    }
-}
-
-function showHistory() {
-    fetch('/api/cli/history')
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            const content = document.getElementById('historyContent');
-            if (data.history.length === 0) {
-                content.innerHTML = '<em>No commands in history</em>';
-            } else {
-                content.innerHTML = data.history.map((cmd, index) => 
-                    `<div style="margin: 5px 0; cursor: pointer;" onclick="insertCommand('${cmd.replace(/'/g, "\\'")}')">${index + 1}. ${cmd}</div>`
-                ).join('');
-            }
-            
-            const modal = new bootstrap.Modal(document.getElementById('historyModal'));
-            modal.show();
-        }
-    })
-    .catch(error => {
-        addToTerminal('Error loading history: ' + error.message, 'error');
-    });
-}
-
-function clearHistory() {
-    fetch('/api/cli/clear', { method: 'POST' })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            commandHistory = [];
-            historyIndex = -1;
-            document.getElementById('historyContent').innerHTML = '<em>History cleared</em>';
-            addToTerminal('Command history cleared.', 'result');
-        }
-    })
-    .catch(error => {
-        addToTerminal('Error clearing history: ' + error.message, 'error');
-    });
-}
-
-function showHelp() {
-    executeCommandDirect('help');
-}
-
-function resetPlayground() {
-    if (confirm('Reset playground? This will clear the terminal and command history.')) {
-        clearTerminal();
-        clearHistory();
-        addToTerminal('Playground reset. Welcome back!', 'result');
-        addToTerminal('Type "help" to see available commands.', 'result');
-    }
-}
-
-function loadAvailableCommands() {
-    fetch('/api/cli/commands')
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            const grid = document.getElementById('commandGrid');
-            grid.innerHTML = data.commands.map(cmd => `
-                <div class="command-item" onclick="insertCommand('${cmd.command}')">
-                    <div class="command-name">${cmd.command}</div>
-                    <div class="command-desc">${cmd.description}</div>
-                </div>
-            `).join('');
-        }
-    })
-    .catch(error => {
-        console.error('Error loading commands:', error);
-    });
-}
-
-function insertCommand(command) {
-    const input = document.getElementById('cliInput');
-    input.value = command;
-    focusInput();
-}
-
-function executeCommandDirect(command) {
-    const input = document.getElementById('cliInput');
-    input.value = command;
-    executeCommand();
-}
-</script>
+<script src="../static/js/cli_playground.js"></script>
 {% endblock %}
