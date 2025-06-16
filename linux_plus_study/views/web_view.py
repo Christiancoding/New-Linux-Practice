@@ -150,37 +150,93 @@ class LinuxPlusStudyWeb:
                         'error': f'Command "{cmd_parts[0] if cmd_parts else command}" not available in this sandbox environment.\nType "help" to see available commands.'
                     })
                 
-                # Execute safe commands with timeout
+                # Execute safe command
                 try:
-                    result = subprocess.run(
-                        command, 
-                        shell=True, 
-                        capture_output=True, 
-                        text=True, 
-                        timeout=5,
-                        cwd='/tmp'  # Safe directory
-                    )
-                    
-                    output = result.stdout
-                    error = result.stderr
-                    
-                    if result.returncode == 0:
-                        return jsonify({'success': True, 'output': output or 'Command executed successfully'})
-                    else:
-                        return jsonify({'success': False, 'error': error or f'Command failed with return code {result.returncode}'})
-                        
+                    result = subprocess.run(cmd_parts, capture_output=True, text=True, timeout=10)
+                    output = result.stdout if result.returncode == 0 else result.stderr
+                    return jsonify({'success': True, 'output': output})
                 except subprocess.TimeoutExpired:
-                    return jsonify({'success': False, 'error': 'Command timed out (5 second limit)'})
+                    return jsonify({'success': False, 'error': 'Command timed out'})
                 except Exception as e:
-                    return jsonify({'success': False, 'error': f'Execution error: {str(e)}'})
+                    return jsonify({'success': False, 'error': f'Error: {str(e)}'})
                     
             except Exception as e:
                 return jsonify({'success': False, 'error': f'Server error: {str(e)}'})
-        
+
+        @app.route('/api/cli/clear', methods=['POST'])
+        def clear_cli_history():
+            """Clear CLI command history"""
+            try:
+                self.cli_history = []
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'History cleared'
+                })
+                
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Server error: {str(e)}'
+                })
+
+        @app.route('/api/cli/commands', methods=['GET'])
+        def get_available_commands():
+            """Get list of available CLI commands"""
+            try:
+                commands = list(cli_playground.safe_commands.keys())
+                commands.sort()
+                
+                command_descriptions = {
+                    'ls': 'List directory contents',
+                    'pwd': 'Print working directory',
+                    'cd': 'Change directory',
+                    'echo': 'Display text',
+                    'cat': 'Display file contents',
+                    'head': 'Display first lines of file',
+                    'tail': 'Display last lines of file',
+                    'grep': 'Search for pattern in file',
+                    'find': 'Find files',
+                    'wc': 'Word, line, character count',
+                    'sort': 'Sort lines in file',
+                    'uniq': 'Remove duplicate lines',
+                    'date': 'Display current date',
+                    'whoami': 'Display current user',
+                    'ps': 'Display running processes'
+                }
+                
+                result = []
+                for cmd in commands:
+                    result.append({
+                        'command': cmd,
+                        'description': command_descriptions.get(cmd, 'No description available')
+                    })
+                
+                return jsonify({
+                    'success': True,
+                    'commands': result
+                })
+                
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Error loading commands: {str(e)}'
+                })
+
         @app.route('/api/cli/history', methods=['GET'])
         def get_cli_history():
-            """Get command history"""
-            return jsonify({'success': True, 'history': self.cli_history})
+            """Get CLI command history"""
+            try:
+                return jsonify({
+                    'success': True,
+                    'history': self.cli_history
+                })
+                
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Error loading history: {str(e)}'
+                })
     def _simulate_command(self, command):
         """Simulate common commands with educational examples"""
         
@@ -350,72 +406,6 @@ class LinuxPlusStudyWeb:
             return render_template('cli_playground.html', 
                                 title='CLI Playground',
                                 active_page='cli_playground')
-
-        @self.app.route('/api/cli/clear', methods=['POST'])
-        def clear_cli_history():
-            """Clear CLI command history"""
-            try:
-                global cli_playground
-                cli_playground.command_history = []
-                
-                return jsonify({
-                    'success': True,
-                    'message': 'History cleared'
-                })
-                
-            except Exception as e:
-                return jsonify({
-                    'success': False,
-                    'error': f'Server error: {str(e)}'
-                })
-        @self.app.route('/api/cli/commands', methods=['GET'])
-        def get_available_commands():
-            """Get list of available CLI commands"""
-            try:
-                commands = list(cli_playground.safe_commands.keys())
-                commands.sort()
-                
-                command_descriptions = {
-                    'ls': 'List directory contents',
-                    'pwd': 'Print working directory',
-                    'cd': 'Change directory',
-                    'echo': 'Display text',
-                    'cat': 'Display file contents',
-                    'head': 'Display first lines of file',
-                    'tail': 'Display last lines of file',
-                    'grep': 'Search for pattern in file',
-                    'find': 'Find files',
-                    'wc': 'Word, line, character count',
-                    'sort': 'Sort lines in file',
-                    'uniq': 'Remove duplicate lines',
-                    'date': 'Display current date',
-                    'whoami': 'Display current user',
-                    'ps': 'Display running processes',
-                    'df': 'Display filesystem usage',
-                    'free': 'Display memory usage',
-                    'uptime': 'Display system uptime',
-                    'history': 'Display command history',
-                    'clear': 'Clear screen',
-                    'help': 'Display available commands'
-                }
-                
-                detailed_commands = []
-                for cmd in commands:
-                    detailed_commands.append({
-                        'command': cmd,
-                        'description': command_descriptions.get(cmd, 'No description available')
-                    })
-                
-                return jsonify({
-                    'success': True,
-                    'commands': detailed_commands
-                })
-                
-            except Exception as e:
-                return jsonify({
-                    'success': False,
-                    'error': f'Server error: {str(e)}'
-                })
         
         @self.app.route('/api/start_quiz', methods=['POST'])
         def api_start_quiz():
@@ -781,6 +771,16 @@ class LinuxPlusStudyWeb:
                 }), 500
         wrapper.__name__ = f.__name__
         return wrapper
+    def _get_help_text(self):
+        """Get help text for CLI playground commands."""
+        return cli_playground.safe_commands.get('help', lambda: "No help available")()
+
+    def _simulate_command(self, command):
+        """Simulate command execution using the CLI playground."""
+        try:
+            return cli_playground.process_command(command)
+        except Exception as e:
+            return f"Error executing command: {str(e)}"
     
     def run_flask_app(self):
         """Run the Flask app in a separate thread."""

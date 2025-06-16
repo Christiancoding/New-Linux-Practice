@@ -1,8 +1,3 @@
-/**
- * CLI Playground JavaScript Module
- * Provides interactive command-line interface functionality
- */
-
 class CLIPlayground {
     constructor() {
         this.commandHistory = [];
@@ -152,10 +147,9 @@ class CLIPlayground {
         if (data.output === 'CLEAR_SCREEN') {
             this.clearTerminal();
         } else {
-            if (data.output) {
+            if (data.success && data.output) {
                 this.addToTerminal(data.output, 'result');
-            }
-            if (data.error) {
+            } else if (!data.success && data.error) {
                 this.addToTerminal(data.error, 'error');
             }
         }
@@ -230,21 +224,37 @@ class CLIPlayground {
             .then(data => {
                 if (data.success) {
                     const content = document.getElementById('historyContent');
-                    if (data.history.length === 0) {
-                        content.innerHTML = '<em>No commands in history</em>';
+                    if (content) {
+                        if (data.history.length === 0) {
+                            content.innerHTML = '<em>No commands in history</em>';
+                        } else {
+                            content.innerHTML = data.history.map((cmd, index) => 
+                                `<div style="margin: 5px 0; cursor: pointer; padding: 5px; border-radius: 3px;" 
+                                      onclick="window.cliPlayground.insertCommand('${cmd.replace(/'/g, "\\'")}')"
+                                      onmouseover="this.style.background='#e9ecef'"
+                                      onmouseout="this.style.background='transparent'">
+                                    ${index + 1}. ${cmd}
+                                 </div>`
+                            ).join('');
+                        }
+                        
+                        // Show modal if it exists
+                        const modal = document.getElementById('historyModal');
+                        if (modal && window.bootstrap) {
+                            const bsModal = new bootstrap.Modal(modal);
+                            bsModal.show();
+                        }
                     } else {
-                        content.innerHTML = data.history.map((cmd, index) => 
-                            `<div style="margin: 5px 0; cursor: pointer; padding: 5px; border-radius: 3px;" 
-                                  onclick="cliPlayground.insertCommand('${cmd.replace(/'/g, "\\'")}')"
-                                  onmouseover="this.style.background='#e9ecef'"
-                                  onmouseout="this.style.background='transparent'">
-                                ${index + 1}. ${cmd}
-                             </div>`
-                        ).join('');
+                        // Fallback: show history in terminal
+                        if (data.history.length === 0) {
+                            this.addToTerminal('No commands in history', 'result');
+                        } else {
+                            this.addToTerminal('Command History:', 'result');
+                            data.history.forEach((cmd, index) => {
+                                this.addToTerminal(`${index + 1}. ${cmd}`, 'result');
+                            });
+                        }
                     }
-                    
-                    const modal = new bootstrap.Modal(document.getElementById('historyModal'));
-                    modal.show();
                 }
             })
             .catch(error => {
@@ -297,7 +307,7 @@ class CLIPlayground {
         if (!grid) return;
         
         grid.innerHTML = commands.map(cmd => `
-            <div class="command-item" onclick="cliPlayground.insertCommand('${cmd.command}')">
+            <div class="command-item" onclick="window.cliPlayground.insertCommand('${cmd.command}')">
                 <div class="command-name">${cmd.command}</div>
                 <div class="command-desc">${cmd.description}</div>
             </div>

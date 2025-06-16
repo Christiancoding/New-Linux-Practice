@@ -65,28 +65,33 @@
             </div>
             
             <!-- Available Commands -->
-            <div class="cli-help-panel">
+            <div class="cli-tutorial">
                 <h5><i class="fas fa-list"></i> Available Commands</h5>
-                <p class="text-muted">Click on any command to insert it into the terminal:</p>
                 <div class="command-grid" id="commandGrid">
-                    <!-- Commands will be loaded here -->
+                    <!-- Commands will be loaded here dynamically -->
                 </div>
             </div>
         </div>
     </div>
 </div>
+{% endblock %}
 
-<!-- Command History Modal -->
-<div class="modal fade" id="historyModal" tabindex="-1">
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/cli_playground.js') }}"></script>
+
+<!-- History Modal -->
+<div class="modal fade" id="historyModal" tabindex="-1" aria-labelledby="historyModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
-        <div class="modal-content">
+        <div class="modal-content bg-dark text-light">
             <div class="modal-header">
-                <h5 class="modal-title">Command History</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <h5 class="modal-title" id="historyModalLabel">
+                    <i class="fas fa-history"></i> Command History
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <div id="historyContent" style="font-family: 'Courier New', monospace; background: #f8f9fa; padding: 15px; border-radius: 4px; max-height: 400px; overflow-y: auto;">
-                    <!-- History will be loaded here -->
+                <div id="historyContent">
+                    <em>Loading history...</em>
                 </div>
             </div>
             <div class="modal-footer">
@@ -94,6 +99,13 @@
                 <button type="button" class="btn btn-danger" onclick="clearHistory()">Clear History</button>
             </div>
         </div>
+    </div>
+</div>
+
+<!-- Loading indicator -->
+<div id="loadingIndicator" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 9999;">
+    <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
     </div>
 </div>
 {% endblock %}
