@@ -7,7 +7,7 @@ Creates a desktop app with modern web interface.
 import webview
 import threading
 import time
-from flask import Flask, render_template, request, jsonify, send_from_directory, session
+from flask import Flask, render_template, request, jsonify, send_from_directory, session, send_file, flash, redirect, url_for
 import os
 import json
 from datetime import datetime
@@ -22,6 +22,9 @@ from utils.config import (
     QUICK_FIRE_QUESTIONS, QUICK_FIRE_TIME_LIMIT, MINI_QUIZ_QUESTIONS,
     POINTS_PER_CORRECT, POINTS_PER_INCORRECT, STREAK_BONUS_THRESHOLD, STREAK_BONUS_MULTIPLIER
 )
+from werkzeug.utils import secure_filename
+import tempfile
+import mimetypes
 
 cli_playground = get_cli_playground()
 
@@ -237,6 +240,705 @@ class LinuxPlusStudyWeb:
                     'success': False,
                     'error': f'Error loading history: {str(e)}'
                 })
+    def setup_export_import_routes(self):
+        """Setup routes for export and import functionality."""
+        
+        @self.app.route('/export/qa/md')
+        def export_qa_markdown():
+            """Export questions and answers to Markdown format with proper download headers."""
+            try:
+                if not self.game_state.questions:
+                    return jsonify({
+                        'success': False, 
+                        'message': 'No questions are currently loaded to export.'
+                    }), 400
+                
+                # Generate filename with timestamp
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"Linux_plus_QA_{timestamp}.md"
+                
+                # Create content in memory instead of temporary file
+                content_lines = []
+                
+                # Write Questions Section
+                content_lines.append("# Questions\n")
+                for i, q_data in enumerate(self.game_state.questions):
+                    if len(q_data) < 5: 
+                        continue
+                    question_text, options, _, category, _ = q_data
+                    content_lines.append(f"**Q{i+1}.** ({category})")
+                    content_lines.append(f"{question_text}")
+                    for j, option in enumerate(options):
+                        content_lines.append(f"   {chr(ord('A') + j)}. {option}")
+                    content_lines.append("")
+
+                content_lines.append("---\n")
+
+                # Write Answers Section
+                content_lines.append("# Answers\n")
+                for i, q_data in enumerate(self.game_state.questions):
+                    if len(q_data) < 5: 
+                        continue
+                    _, options, correct_answer_index, _, explanation = q_data
+                    if 0 <= correct_answer_index < len(options):
+                        correct_option_letter = chr(ord('A') + correct_answer_index)
+                        correct_option_text = options[correct_answer_index]
+                        content_lines.append(f"**A{i+1}.** {correct_option_letter}. {correct_option_text}")
+                        if explanation:
+                            explanation_lines = explanation.split('\n')
+                            content_lines.append("   *Explanation:*")
+                            for line in explanation_lines:
+                                content_lines.append(f"   {line.strip()}")
+                        content_lines.append("")
+                    else:
+                        content_lines.append(f"**A{i+1}.** Error: Invalid correct answer index.")
+                        content_lines.append("")
+                
+                # Join content
+                content = '\n'.join(content_lines)
+                
+                # Create response with proper headers
+                from flask import Response
+                response = Response(
+                    content,
+                    mimetype='text/markdown',
+                    headers={
+                        'Content-Disposition': f'attachment; filename="{filename}"',
+                        'Content-Type': 'text/markdown; charset=utf-8',
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache',
+                        'Expires': '0'
+                    }
+                )
+                
+                return response
+                
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'message': f'Error exporting Q&A to Markdown: {str(e)}'
+                }), 500
+
+        @self.app.route('/export/qa/json')
+        def export_qa_json():
+            """Export questions and answers to JSON format with proper download headers."""
+            try:
+                if not self.game_state.questions:
+                    return jsonify({
+                        'success': False,
+                        'message': 'No questions are currently loaded to export.'
+                    }), 400
+                
+                # Generate filename with timestamp
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"Linux_plus_QA_{timestamp}.json"
+                
+                # Prepare questions data for JSON export
+                questions_data = []
+                for i, q_data in enumerate(self.game_state.questions):
+                    if len(q_data) < 5: 
+                        continue
+                    question_text, options, correct_answer_index, category, explanation = q_data
+                    
+                    question_obj = {
+                        "id": i + 1,
+                        "question": question_text,
+                        "category": category,
+                        "options": options,
+                        "correct_answer_index": correct_answer_index,
+                        "correct_answer_letter": chr(ord('A') + correct_answer_index) if 0 <= correct_answer_index < len(options) else "Invalid",
+                        "correct_answer_text": options[correct_answer_index] if 0 <= correct_answer_index < len(options) else "Invalid index",
+                        "explanation": explanation if explanation else ""
+                    }
+                    questions_data.append(question_obj)
+
+                # Create the final JSON structure
+                export_data = {
+                    "metadata": {
+                        "title": "Linux+ Study Questions",
+                        "export_date": datetime.now().isoformat(),
+                        "total_questions": len(questions_data),
+                        "categories": sorted(list(set(q["category"] for q in questions_data)))
+                    },
+                    "questions": questions_data
+                }
+                
+                # Convert to JSON string
+                json_content = json.dumps(export_data, indent=2, ensure_ascii=False)
+                
+                # Create response with proper headers
+                from flask import Response
+                response = Response(
+                    json_content,
+                    mimetype='application/json',
+                    headers={
+                        'Content-Disposition': f'attachment; filename="{filename}"',
+                        'Content-Type': 'application/json; charset=utf-8',
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache',
+                        'Expires': '0'
+                    }
+                )
+                
+                return response
+                
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'message': f'Error exporting Q&A to JSON: {str(e)}'
+                }), 500
+
+        @self.app.route('/import/questions', methods=['GET', 'POST'])
+        def import_questions():
+            """Enhanced import with duplicate detection and comprehensive reporting."""
+            if request.method == 'GET':
+                return render_template('import.html')
+            
+            try:
+                # File validation (existing code...)
+                if 'file' not in request.files:
+                    return jsonify({'success': False, 'message': 'No file was uploaded.'}), 400
+                
+                file = request.files['file']
+                if file.filename == '':
+                    return jsonify({'success': False, 'message': 'No file was selected.'}), 400
+                
+                filename = secure_filename(file.filename)
+                file_ext = filename.lower().split('.')[-1] if '.' in filename else ''
+                
+                if file_ext not in ['json', 'md']:
+                    return jsonify({
+                        'success': False,
+                        'message': 'Only JSON and Markdown (.md) files are supported.'
+                    }), 400
+                
+                # File size validation
+                file.seek(0, 2)
+                file_size = file.tell()
+                file.seek(0)
+                
+                if file_size > 10 * 1024 * 1024:  # 10MB limit
+                    return jsonify({
+                        'success': False,
+                        'message': 'File size too large. Maximum size is 10MB.'
+                    }), 400
+                
+                # Read and parse content
+                try:
+                    file_content = file.read().decode('utf-8')
+                except UnicodeDecodeError:
+                    return jsonify({
+                        'success': False,
+                        'message': 'File encoding error. Please ensure the file is UTF-8 encoded.'
+                    }), 400
+                
+                # Parse questions
+                if file_ext == 'json':
+                    imported_questions = self._parse_json_questions(file_content)
+                elif file_ext == 'md':
+                    imported_questions = self._parse_markdown_questions(file_content)
+                
+                if not imported_questions:
+                    return jsonify({
+                        'success': False,
+                        'message': 'No valid questions found in the uploaded file.'
+                    }), 400
+                
+                # Apply duplicate detection
+                filtered_questions, duplicate_report = self._detect_and_eliminate_duplicates(imported_questions)
+                
+                # Add questions to system
+                total_added = 0
+                errors = []
+                
+                for question_data in filtered_questions:
+                    try:
+                        # Validate question structure
+                        if not question_data.get('question', '').strip():
+                            errors.append(f"Question with empty text skipped")
+                            continue
+                        
+                        if not question_data.get('options') or len(question_data['options']) < 2:
+                            errors.append(f"Question with insufficient options skipped")
+                            continue
+                        
+                        # Convert to tuple format
+                        question_tuple = (
+                            question_data.get('question', ''),
+                            question_data.get('options', []),
+                            question_data.get('correct_answer_index', 0),
+                            question_data.get('category', 'General'),
+                            question_data.get('explanation', '')
+                        )
+                        
+                        if self._add_question_to_pool(question_tuple):
+                            total_added += 1
+                        else:
+                            errors.append(f"Failed to add question to pool")
+                            
+                    except Exception as e:
+                        errors.append(f"Error processing question: {str(e)}")
+                        continue
+                
+                # Prepare comprehensive response
+                response_message = f'Successfully imported {total_added} unique questions from {filename}.'
+                
+                if duplicate_report['duplicates_found'] > 0:
+                    response_message += f'\n{duplicate_report["duplicates_found"]} duplicates were detected and skipped.'
+                
+                if errors:
+                    response_message += f'\n{len(errors)} questions had processing errors.'
+                
+                return jsonify({
+                    'success': True,
+                    'message': response_message,
+                    'total_imported': total_added,
+                    'duplicate_report': duplicate_report,
+                    'errors': errors[:10] if errors else []  # Limit error details
+                })
+                
+            except Exception as e:
+                import traceback
+                error_details = traceback.format_exc()
+                print(f"Import error: {error_details}")
+                
+                return jsonify({
+                    'success': False,
+                    'message': f'Error importing questions: {str(e)}'
+                }), 500
+    def _parse_json_questions(self, content):
+        """
+        Parse questions from JSON content with comprehensive format support.
+        
+        Args:
+            content (str): JSON content string
+            
+        Returns:
+            List[dict]: Normalized question dictionaries
+            
+        Raises:
+            ValueError: If JSON format is invalid or unsupported
+        """
+        try:
+            data = json.loads(content)
+            questions = []
+            
+            # Handle different JSON formats
+            if isinstance(data, list):
+                # Direct list of questions
+                for item in data:
+                    if isinstance(item, dict):
+                        questions.append(self._normalize_question_dict(item))
+                    elif isinstance(item, (list, tuple)) and len(item) >= 4:
+                        # Handle tuple format: (question, options, correct_index, category, explanation)
+                        questions.append({
+                            'question': str(item[0]),
+                            'options': list(item[1]) if len(item) > 1 else [],
+                            'correct_answer_index': int(item[2]) if len(item) > 2 else 0,
+                            'category': str(item[3]) if len(item) > 3 else 'General',
+                            'explanation': str(item[4]) if len(item) > 4 else ''
+                        })
+                            
+            elif isinstance(data, dict):
+                if 'questions' in data:
+                    # Structured format with metadata
+                    for item in data['questions']:
+                        if isinstance(item, dict):
+                            questions.append(self._normalize_question_dict(item))
+                        elif isinstance(item, (list, tuple)) and len(item) >= 4:
+                            questions.append({
+                                'question': str(item[0]),
+                                'options': list(item[1]) if len(item) > 1 else [],
+                                'correct_answer_index': int(item[2]) if len(item) > 2 else 0,
+                                'category': str(item[3]) if len(item) > 3 else 'General',
+                                'explanation': str(item[4]) if len(item) > 4 else ''
+                            })
+                else:
+                    # Single question object
+                    questions.append(self._normalize_question_dict(data))
+            
+            return questions
+            
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON format: {e}")
+        except Exception as e:
+            raise ValueError(f"Error parsing JSON content: {e}")
+
+    def _parse_markdown_questions(self, content):
+        """
+        Enhanced markdown parser for Linux+ study format with comprehensive validation.
+        
+        Handles format:
+        **Q1.** (Category)
+        Question text
+        A. Option A
+        B. Option B
+        ...
+        
+        **A1.** C. Option text
+        *Explanation:* Detailed explanation
+        """
+        questions = []
+        lines = content.split('\n')
+        
+        # State tracking variables
+        in_questions_section = False
+        in_answers_section = False
+        current_question = None
+        current_options = []
+        answers_dict = {}
+        explanations_dict = {}
+        
+        # Enhanced parsing with robust error handling
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            
+            try:
+                # Section detection
+                if line == "# Questions":
+                    in_questions_section = True
+                    in_answers_section = False
+                    continue
+                elif line == "# Answers":
+                    in_questions_section = False
+                    in_answers_section = True
+                    continue
+                elif line == "---":
+                    in_questions_section = False
+                    continue
+                
+                # Question parsing
+                elif in_questions_section and line.startswith("**Q"):
+                    # Save previous question if exists
+                    if current_question and current_options:
+                        questions.append({
+                            'question_number': current_question['number'],
+                            'question': current_question['text'],
+                            'options': current_options.copy(),
+                            'category': current_question['category'],
+                            'correct_answer_index': 0,  # Will be set from answers
+                            'explanation': ''  # Will be set from answers
+                        })
+                    
+                    # Parse new question header
+                    # Format: **Q1.** (Category)
+                    import re
+                    question_match = re.match(r'\*\*Q(\d+)\.\*\*\s*\(([^)]+)\)', line)
+                    if question_match:
+                        question_number = int(question_match.group(1))
+                        category = question_match.group(2).strip()
+                        
+                        # Get question text (next non-empty line)
+                        i += 1
+                        question_text = ""
+                        while i < len(lines) and lines[i].strip():
+                            question_line = lines[i].strip()
+                            # Stop if we hit an option
+                            if re.match(r'^[A-Z]\.\s', question_line):
+                                i -= 1  # Back up to process this line as option
+                                break
+                            question_text += " " + question_line if question_text else question_line
+                            i += 1
+                        
+                        current_question = {
+                            'number': question_number,
+                            'text': question_text.strip(),
+                            'category': category
+                        }
+                        current_options = []
+                
+                # Option parsing
+                elif in_questions_section and re.match(r'^[A-Z]\.\s', line):
+                    option_text = line[3:].strip()  # Remove "A. ", "B. ", etc.
+                    current_options.append(option_text)
+                
+                # Answer parsing
+                elif in_answers_section and line.startswith("**A"):
+                    # Format: **A1.** C. Option text
+                    answer_match = re.match(r'\*\*A(\d+)\.\*\*\s*([A-Z])\.\s*(.*)', line)
+                    if answer_match:
+                        answer_number = int(answer_match.group(1))
+                        correct_letter = answer_match.group(2)
+                        correct_index = ord(correct_letter) - ord('A')
+                        answers_dict[answer_number] = correct_index
+                        
+                        # Look for explanation on following lines
+                        explanation = ""
+                        j = i + 1
+                        while j < len(lines):
+                            next_line = lines[j].strip()
+                            if next_line.startswith("*Explanation:*"):
+                                # Extract explanation text
+                                explanation = next_line.replace("*Explanation:*", "").strip()
+                                j += 1
+                                # Continue reading explanation lines
+                                while j < len(lines):
+                                    exp_line = lines[j].strip()
+                                    if exp_line.startswith("**A") or exp_line.startswith("**Q") or not exp_line:
+                                        break
+                                    explanation += " " + exp_line
+                                    j += 1
+                                break
+                            elif next_line.startswith("**A") or not next_line:
+                                break
+                            j += 1
+                        
+                        explanations_dict[answer_number] = explanation.strip()
+            
+            except Exception as e:
+                print(f"Warning: Error parsing line {i}: '{line}': {e}")
+            
+            i += 1
+        
+        # Add final question if exists
+        if current_question and current_options:
+            questions.append({
+                'question_number': current_question['number'],
+                'question': current_question['text'],
+                'options': current_options.copy(),
+                'category': current_question['category'],
+                'correct_answer_index': 0,
+                'explanation': ''
+            })
+        
+        # Apply answers and explanations
+        for question in questions:
+            question_num = question['question_number']
+            if question_num in answers_dict:
+                question['correct_answer_index'] = answers_dict[question_num]
+            if question_num in explanations_dict:
+                question['explanation'] = explanations_dict[question_num]
+        
+        return questions
+
+    def _detect_and_eliminate_duplicates(self, new_questions, existing_questions=None):
+        """
+        Comprehensive duplicate detection and elimination system.
+        
+        Args:
+            new_questions (list): Questions being imported
+            existing_questions (list): Current questions in the system
+            
+        Returns:
+            tuple: (filtered_questions, duplicate_report)
+        """
+        if existing_questions is None:
+            existing_questions = self.game_state.questions
+        
+        # Convert existing questions to comparable format
+        existing_set = set()
+        for q_data in existing_questions:
+            if len(q_data) >= 5:
+                question_text, options, _, category, _ = q_data
+                # Create normalized signature
+                signature = self._create_question_signature(question_text, options, category)
+                existing_set.add(signature)
+        
+        # Process new questions for duplicates
+        filtered_questions = []
+        duplicates_found = []
+        internal_duplicates = set()
+        
+        for i, question in enumerate(new_questions):
+            signature = self._create_question_signature(
+                question['question'], 
+                question['options'], 
+                question['category']
+            )
+            
+            # Check against existing questions
+            if signature in existing_set:
+                duplicates_found.append({
+                    'type': 'existing_duplicate',
+                    'question_number': i + 1,
+                    'question_text': question['question'][:100] + '...' if len(question['question']) > 100 else question['question']
+                })
+                continue
+            
+            # Check for internal duplicates within import
+            if signature in internal_duplicates:
+                duplicates_found.append({
+                    'type': 'internal_duplicate',
+                    'question_number': i + 1,
+                    'question_text': question['question'][:100] + '...' if len(question['question']) > 100 else question['question']
+                })
+                continue
+            
+            # Question is unique
+            internal_duplicates.add(signature)
+            filtered_questions.append(question)
+        
+        duplicate_report = {
+            'total_processed': len(new_questions),
+            'duplicates_found': len(duplicates_found),
+            'unique_questions': len(filtered_questions),
+            'duplicate_details': duplicates_found
+        }
+        
+        return filtered_questions, duplicate_report
+
+    def _create_question_signature(self, question_text, options, category):
+        """
+        Generate normalized signature for duplicate detection.
+        
+        Uses multiple factors to create robust duplicate identification:
+        - Normalized question text (case-insensitive, whitespace-normalized)
+        - Option count and content
+        - Category matching
+        """
+        import hashlib
+        import re
+        
+        # Normalize question text
+        normalized_question = re.sub(r'\s+', ' ', question_text.lower().strip())
+        normalized_question = re.sub(r'[^\w\s]', '', normalized_question)  # Remove punctuation
+        
+        # Normalize options
+        normalized_options = []
+        for option in options:
+            normalized_option = re.sub(r'\s+', ' ', option.lower().strip())
+            normalized_option = re.sub(r'[^\w\s]', '', normalized_option)
+            normalized_options.append(normalized_option)
+        
+        # Create signature components
+        signature_components = [
+            normalized_question,
+            str(len(options)),
+            '|'.join(sorted(normalized_options)),
+            category.lower().strip()
+        ]
+        
+        # Generate hash signature
+        signature_string = '###'.join(signature_components)
+        return hashlib.md5(signature_string.encode('utf-8')).hexdigest()
+
+    def _normalize_question_dict(self, question_dict):
+        """
+        Normalize question dictionary to standard format with validation.
+        
+        Args:
+            question_dict (dict): Raw question dictionary
+            
+        Returns:
+            dict: Normalized question dictionary
+        """
+        try:
+            # Handle different possible field names
+            question_text = (
+                question_dict.get('question') or 
+                question_dict.get('question_text') or 
+                question_dict.get('text') or 
+                ''
+            )
+            
+            options = (
+                question_dict.get('options') or 
+                question_dict.get('choices') or 
+                question_dict.get('answers') or 
+                []
+            )
+            
+            # Handle different correct answer formats
+            correct_answer_index = 0
+            if 'correct_answer_index' in question_dict:
+                correct_answer_index = int(question_dict['correct_answer_index'])
+            elif 'correct_index' in question_dict:
+                correct_answer_index = int(question_dict['correct_index'])
+            elif 'correct_answer' in question_dict:
+                # Try to find the index of the correct answer
+                correct_answer = question_dict['correct_answer']
+                if isinstance(correct_answer, str) and len(correct_answer) == 1 and correct_answer.isalpha():
+                    # Letter format (A, B, C, D)
+                    correct_answer_index = ord(correct_answer.upper()) - ord('A')
+                elif isinstance(correct_answer, str) and correct_answer in options:
+                    # Full text match
+                    correct_answer_index = options.index(correct_answer)
+            
+            # Validate correct_answer_index
+            if not (0 <= correct_answer_index < len(options)) and options:
+                correct_answer_index = 0
+            
+            category = (
+                question_dict.get('category') or 
+                question_dict.get('topic') or 
+                question_dict.get('subject') or 
+                'General'
+            )
+            
+            explanation = (
+                question_dict.get('explanation') or 
+                question_dict.get('rationale') or 
+                question_dict.get('details') or 
+                ''
+            )
+            
+            return {
+                'question': str(question_text),
+                'options': [str(opt) for opt in options],
+                'correct_answer_index': correct_answer_index,
+                'category': str(category),
+                'explanation': str(explanation)
+            }
+            
+        except Exception as e:
+            print(f"Warning: Error normalizing question: {e}")
+            return {
+                'question': str(question_dict.get('question', 'Invalid question')),
+                'options': ['A', 'B', 'C', 'D'],
+                'correct_answer_index': 0,
+                'category': 'General',
+                'explanation': ''
+            }
+
+    def _add_question_to_pool(self, question_tuple):
+        """
+        Add a question tuple to the current question pool with enhanced integration.
+        
+        Args:
+            question_tuple (tuple): Question data in tuple format
+        """
+        try:
+            # Method 1: Try using question manager if available
+            if hasattr(self.game_state, 'question_manager') and self.game_state.question_manager:
+                from models.question import Question
+                try:
+                    question_obj = Question.from_tuple(question_tuple)
+                    self.game_state.question_manager.add_question(question_obj)
+                    return True
+                except Exception as e:
+                    print(f"Warning: Question manager failed: {e}")
+            
+            # Method 2: Direct integration with game state
+            if hasattr(self.game_state, 'questions'):
+                # Ensure questions is a list
+                if not isinstance(self.game_state.questions, list):
+                    self.game_state.questions = list(self.game_state.questions)
+                
+                # Add the new question
+                self.game_state.questions.append(question_tuple)
+                
+                # Update categories if possible
+                if hasattr(self.game_state, 'categories') and len(question_tuple) > 3:
+                    if isinstance(self.game_state.categories, set):
+                        self.game_state.categories.add(question_tuple[3])
+                    elif isinstance(self.game_state.categories, list):
+                        if question_tuple[3] not in self.game_state.categories:
+                            self.game_state.categories.append(question_tuple[3])
+                
+                return True
+            
+            # Method 3: Fallback - store in temporary container
+            if not hasattr(self.game_state, '_imported_questions'):
+                self.game_state._imported_questions = []
+            self.game_state._imported_questions.append(question_tuple)
+            
+            print(f"Warning: Question added to temporary storage. Manual integration may be required.")
+            return True
+            
+        except Exception as e:
+            print(f"Error adding question to pool: {e}")
+            return False
     def _simulate_command(self, command):
         """Simulate common commands with educational examples"""
         
@@ -758,6 +1460,21 @@ class LinuxPlusStudyWeb:
                 return jsonify(result)
             except Exception as e:
                 return jsonify({'success': False, 'error': str(e)})
+        @self.app.route('/api/question-count')
+        def get_question_count():
+            """Get the current number of questions available."""
+            try:
+                count = len(self.game_state.questions)
+                return jsonify({
+                    'success': True,
+                    'count': count
+                })
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': str(e)
+                }), 500
+        self.setup_export_import_routes()
     def handle_api_errors(f):
         def wrapper(*args, **kwargs):
             try:

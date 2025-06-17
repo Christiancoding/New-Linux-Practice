@@ -462,3 +462,86 @@ function debounce(func, wait) {
         timeout = setTimeout(later, wait);
     };
 }
+// Export/Import functionality
+function exportQuestionsMarkdown() {
+    showToast('Preparing Markdown export...', 'info');
+    
+    // Create a temporary link element to trigger download
+    window.location.href = '/export/qa/md';
+    
+    setTimeout(() => {
+        showToast('Markdown export started! Check your downloads.', 'success');
+    }, 1000);
+}
+
+function exportQuestionsJSON() {
+    showToast('Preparing JSON export...', 'info');
+    
+    // Create a temporary link element to trigger download
+    window.location.href = '/export/qa/json';
+    
+    setTimeout(() => {
+        showToast('JSON export started! Check your downloads.', 'success');
+    }, 1000);
+}
+
+function updateQuestionCount() {
+    fetch('/api/question-count')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('question-count').textContent = data.count;
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching question count:', error);
+            document.getElementById('question-count').textContent = 'Unknown';
+        });
+}
+
+// Toast notification system (if not already present)
+function showToast(message, type = 'info') {
+    // Create toast element
+    const toast = document.createElement('div');
+    toast.className = `alert alert-${type === 'success' ? 'success' : type === 'error' ? 'danger' : 'info'} position-fixed`;
+    toast.style.cssText = `
+        top: 20px; 
+        right: 20px; 
+        z-index: 9999; 
+        min-width: 300px;
+        animation: slideIn 0.3s ease-out;
+    `;
+    toast.innerHTML = `
+        <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i>
+        ${message}
+        <button type="button" class="btn-close float-end" onclick="this.parentElement.remove()"></button>
+    `;
+    
+    // Add CSS animation if not present
+    if (!document.getElementById('toast-styles')) {
+        const style = document.createElement('style');
+        style.id = 'toast-styles';
+        style.textContent = `
+            @keyframes slideIn {
+                from { transform: translateX(100%); opacity: 0; }
+                to { transform: translateX(0); opacity: 1; }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+    
+    document.body.appendChild(toast);
+    
+    // Auto-remove after 3 seconds
+    setTimeout(() => {
+        if (toast.parentElement) {
+            toast.style.animation = 'slideIn 0.3s ease-out reverse';
+            setTimeout(() => toast.remove(), 300);
+        }
+    }, 3000);
+}
+
+// Update question count on page load
+document.addEventListener('DOMContentLoaded', function() {
+    updateQuestionCount();
+});
