@@ -157,7 +157,31 @@ class CLIPlayground:
             return command_handlers[command](args)
         else:
             return f"-bash: {command}: command not found"
-    
+    def _handle_help(self, args: List[str]) -> str:
+        """Handle the help command."""
+        return (
+            "Available commands:\n"
+            "  help          - Show this help message\n"
+            "  clear         - Clear the terminal screen\n"
+            "  ls [path]    - List directory contents\n"
+            "  pwd          - Print working directory\n"
+            "  whoami       - Show current user\n"
+            "  date         - Show current date and time\n"
+            "  uname        - Show system information\n"
+            "  cat <file>   - Display file contents\n"
+            "  cd <dir>     - Change directory\n"
+            "  mkdir <dir>  - Create a new directory\n"
+            "  touch <file> - Create an empty file or update timestamp\n"
+            "  rm <file>    - Remove a file\n"
+            "  cp <src> <dest> - Copy files or directories\n"
+            "  mv <src> <dest> - Move or rename files or directories\n"
+            "  grep <pattern> <file> - Search for a pattern in a file\n"
+            "  ps           - Show running processes\n"
+            "  top          - Display system resource usage\n"
+            "  df           - Show disk space usage\n"
+            "  free         - Show memory usage\n"
+            "  history      - Show command history\n"
+        )
     def _handle_clear(self, args: List[str]) -> str:
         """Handle the clear command."""
         return "CLEAR_SCREEN"  # Special return value to indicate screen clear

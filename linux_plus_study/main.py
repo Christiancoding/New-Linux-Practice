@@ -3,7 +3,7 @@
 Linux+ Study Game - Main Entry Point
 
 A comprehensive study tool for CompTIA Linux+ certification preparation
-featuring both CLI and GUI interfaces with gamification elements.
+featuring both CLI and web interfaces with gamification elements.
 """
 
 import sys
@@ -43,14 +43,14 @@ def detect_interface_preference():
 
 def get_user_interface_choice_with_web():
     """
-    Prompt user to choose between CLI orWeb interfaces.
+    Prompt user to choose between CLI orweb interfaces.
     
     Returns:
         str: 'cli', or 'web'
     """
     while True:
         try:
-            prompt_text = f"{COLOR_PROMPT}Choose interface ({COLOR_OPTIONS}CLI{COLOR_PROMPT} or {COLOR_OPTIONS}WEB{COLOR_PROMPT}): {COLOR_INPUT}"
+            prompt_text = f"{COLOR_PROMPT}Choose interface ({COLOR_OPTIONS}CLI{COLOR_PROMPT} or {COLOR_OPTIONS}web{COLOR_PROMPT}): {COLOR_INPUT}"
             print(prompt_text, end='')
             sys.stdout.flush()
             
@@ -71,21 +71,21 @@ def get_user_interface_choice_with_web():
 
 def get_user_interface_choice():
     """
-    Prompt user to choose between CLI and GUI interfaces.
+    Prompt user to choose between CLI and web interfaces.
     
     Returns:
-        str: 'cli' or 'gui'
+        str: 'cli' or 'web'
     """
     while True:
         try:
-            prompt_text = f"{COLOR_PROMPT}Choose interface ({COLOR_OPTIONS}CLI{COLOR_PROMPT} or {COLOR_OPTIONS}GUI{COLOR_PROMPT}): {COLOR_INPUT}"
+            prompt_text = f"{COLOR_PROMPT}Choose interface ({COLOR_OPTIONS}CLI{COLOR_PROMPT} or {COLOR_OPTIONS}web{COLOR_PROMPT}): {COLOR_INPUT}"
             print(prompt_text, end='')
             sys.stdout.flush()
             
             choice = input().lower().strip()
             print(COLOR_RESET, end='')
             
-            if choice in ['cli', 'gui']:
+            if choice in ['cli', 'web']:
                 return choice
             else:
                 print(f"{COLOR_INFO} Invalid choice. Please type 'cli' or 'web'. {COLOR_RESET}")
@@ -121,18 +121,9 @@ def launch_cli_interface(game_state):
         game_state.save_achievements()
         traceback.print_exc()
         sys.exit(1)
-
-
-def launch_gui_interface(game_state):
-    """
-    Launch the GUI interface.
-    
-    Args:
-        game_state: GameState instance
-    """
 def launch_web_interface(game_state):
     """
-    Launch the Web interface.
+    Launch the web interface.
     
     Args:
         game_state: GameState instance
@@ -142,7 +133,7 @@ def launch_web_interface(game_state):
         web_view.start()
         
     except ImportError as e:
-        print(f"Error: Failed to initialize Web interface.")
+        print(f"Error: Failed to initialize web interface.")
         print(f"Missing required packages. Install with: pip install flask pywebview")
         print(f"Error details: {e}")
         
@@ -152,7 +143,7 @@ def launch_web_interface(game_state):
         sys.exit(1)
         
     except Exception as e:
-        print(f"\nAn unexpected error occurred launching the Web interface: {e}")
+        print(f"\nAn unexpected error occurred launching the web interface: {e}")
         print("Error details:")
         traceback.print_exc()
         print("Attempting to save progress...")
