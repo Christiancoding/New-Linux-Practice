@@ -773,7 +773,8 @@ class LinuxPlusStudyWeb:
         return wrapper
     def _get_help_text(self):
         """Get help text for CLI playground commands."""
-        return cli_playground.safe_commands.get('help', lambda: "No help available")()
+        help_func = cli_playground.safe_commands.get('help', lambda args: "No help available")
+        return help_func([])  # Pass empty args list
 
     def _simulate_command(self, command):
         """Simulate command execution using the CLI playground."""

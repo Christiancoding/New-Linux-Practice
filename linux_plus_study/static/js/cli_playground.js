@@ -177,14 +177,19 @@ class CLIPlayground {
     }
     
     formatOutput(text, type) {
+        // Escape HTML to prevent injection first
+        let escaped = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        
+        // Convert newlines to HTML line breaks
+        escaped = escaped.replace(/\n/g, '<br>');
+        
         // Basic syntax highlighting for file listings
         if (type === 'result' && text.includes('  ')) {
             // Possible ls output - highlight file extensions
-            return text.replace(/(\S+\.\w+)/g, '<span style="color: #ffaa00;">$1</span>');
+            escaped = escaped.replace(/(\S+\.\w+)/g, '<span style="color: #ffaa00;">$1</span>');
         }
         
-        // Escape HTML to prevent injection
-        return text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        return escaped;
     }
     
     addWelcomeMessage() {

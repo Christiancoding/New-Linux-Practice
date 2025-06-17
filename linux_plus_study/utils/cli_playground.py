@@ -942,9 +942,11 @@ tmpfs            2048000  102400   1945600   5% /dev/shm'''
     
     def _cmd_free(self, args: List[str]) -> str:
         """Display memory usage (simulated)"""
-        return '''              total        used        free      shared  buff/cache   available
+        return 
+    '''              total        used        free      shared  buff/cache   available
 Mem:        8192000     2048000     4096000      102400     2048000     5632000
-Swap:       2048000           0     2048000'''
+Swap:       2048000           0     2048000
+'''
     
     def _cmd_uptime(self, args: List[str]) -> str:
         """Display system uptime (simulated)"""
@@ -966,20 +968,52 @@ Swap:       2048000           0     2048000'''
     
     def _cmd_help(self, args: List[str]) -> str:
         """Display available commands"""
-        commands = sorted(self.safe_commands.keys())
-        return f'''Available commands in CLI Playground:
-{', '.join(commands)}
+        return '''Linux Plus CLI Playground - Available Commands
 
-Educational Linux environment for safe command practice.
-Note: This is a sandbox environment with limited functionality.
+    ═══════════════════════════════════════════════════════════
 
-Examples:
-  ls              - list files
-  cat sample.txt  - view file contents
-  grep INFO log.txt - search for pattern
-  wc data.csv     - count lines/words/chars
-  head -n 5 notes.md - show first 5 lines
-'''
+    FILE OPERATIONS:
+    ls                    List files and directories
+    cat <file>           Display file contents  
+    head <file>          Show first 10 lines of file
+    tail <file>          Show last 10 lines of file
+
+    TEXT PROCESSING:
+    grep <pattern> <file> Search for pattern in file
+    wc <file>            Count lines, words, and characters
+    sort <file>          Sort lines in file
+    uniq <file>          Remove duplicate lines
+
+    SYSTEM INFO:
+    pwd                  Show current directory path
+    whoami              Display current username
+    date                Show current date and time
+    ps                  Display running processes
+    df                  Show filesystem usage
+    free                Show memory usage
+    uptime              Show system uptime
+
+    UTILITIES:
+    echo "text"         Display text
+    find <path>         Find files and directories
+    history             Show command history
+    clear               Clear the terminal screen
+    help                Show this help message
+
+    ═══════════════════════════════════════════════════════════
+
+    SAMPLE FILES: sample.txt, data.csv, notes.md, log.txt
+
+    EXAMPLES:
+    ls                  → List available files
+    cat sample.txt      → View sample file contents
+    grep INFO log.txt   → Search for "INFO" in log file
+    wc data.csv         → Count lines/words/chars in CSV
+    head -n 5 notes.md  → Show first 5 lines of notes
+
+    Educational Linux environment for safe command practice.
+    Note: This is a sandbox environment with limited functionality.
+    '''
 
 def get_cli_playground():
     """Get CLI playground instance"""
