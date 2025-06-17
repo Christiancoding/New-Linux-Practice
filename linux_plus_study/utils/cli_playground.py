@@ -158,51 +158,6 @@ class CLIPlayground:
         else:
             return f"-bash: {command}: command not found"
     
-    def _handle_help(self, args: List[str]) -> str:
-        """Handle the help command."""
-        return (
-            "Simulated Commands Available:\n\n"
-            "Basic Commands:\n"
-            "  help                    - Shows this help message\n"
-            "  clear                   - Clears the terminal screen\n"
-            "  ls [-l] [path]          - Lists files and directories\n"
-            "  pwd                     - Shows current directory\n"
-            "  cd [directory]          - Changes directory\n"
-            "  cat [file]              - Displays file contents\n"
-            "  mkdir [directory]       - Creates directory\n"
-            "  touch [file]            - Creates empty file\n"
-            "  rm [file]               - Removes file\n"
-            "  cp [source] [dest]      - Copies file\n"
-            "  mv [source] [dest]      - Moves/renames file\n"
-            "  grep [pattern] [file]   - Searches for pattern\n"
-            "  whoami                  - Shows current user\n"
-            "  date                    - Shows current date\n"
-            "  history                 - Shows command history\n\n"
-            "System Information:\n"
-            "  uname [-a]              - System information\n"
-            "  ps [aux]                - Shows running processes\n"
-            "  top                     - Shows system resource usage\n"
-            "  df [-h]                 - Shows disk usage\n"
-            "  free [-h]               - Shows memory usage\n\n"
-            "Linux+ Specific Commands:\n"
-            "  grub2-install [device]  - Installs GRUB2 bootloader\n"
-            "  grub2-mkconfig [-o]     - Generates GRUB config\n"
-            "  update-grub             - Updates GRUB (Debian-based)\n"
-            "  mkinitrd [args]         - Creates initrd image\n"
-            "  dracut [args]           - Creates initramfs image\n"
-            "  nmap [options] [host]   - Network scanning\n"
-            "  systemctl [action] [service] - Service management\n"
-            "  journalctl [options]    - View system logs\n"
-            "  firewall-cmd [options]  - Firewall management\n"
-            "  iptables [options]      - Advanced firewall rules\n"
-            "  lsmod                   - Lists loaded kernel modules\n"
-            "  modprobe [module]       - Loads kernel module\n"
-            "  lsblk                   - Lists block devices\n"
-            "  fdisk [options]         - Disk partitioning\n"
-            "  mount [device] [point]  - Mounts filesystem\n"
-            "  umount [device]         - Unmounts filesystem"
-        )
-    
     def _handle_clear(self, args: List[str]) -> str:
         """Handle the clear command."""
         return "CLEAR_SCREEN"  # Special return value to indicate screen clear
@@ -967,53 +922,76 @@ Swap:       2048000           0     2048000
         return 'CLEAR_SCREEN'  # Special marker for frontend
     
     def _cmd_help(self, args: List[str]) -> str:
-        """Display available commands"""
-        return '''Linux Plus CLI Playground - Available Commands
+        """Handle the help command for web interface."""
+        return '''Linux+ Study CLI Playground - Commands Reference
 
-    ═══════════════════════════════════════════════════════════
+    ═══════════════════════════════════════════════════════════════════
 
-    FILE OPERATIONS:
-    ls                    List files and directories
-    cat <file>           Display file contents  
-    head <file>          Show first 10 lines of file
-    tail <file>          Show last 10 lines of file
+    BASIC COMMANDS:
+    help                    - Shows this help message
+    clear                   - Clears the terminal screen
+    ls [-l] [path]          - Lists files and directories
+    pwd                     - Shows current directory
+    cd [directory]          - Changes directory
+    cat [file]              - Displays file contents
+    mkdir [directory]       - Creates directory
+    touch [file]            - Creates empty file
+    rm [file]               - Removes file
+    cp [source] [dest]      - Copies file
+    mv [source] [dest]      - Moves/renames file
+    grep [pattern] [file]   - Searches for pattern
+    echo [text]             - Displays text output
+    find [path]             - Finds files and directories
+    whoami                  - Shows current user
+    date                    - Shows current date
+    history                 - Shows command history
+
+    SYSTEM INFORMATION:
+    uname [-a]              - System information
+    ps [aux]                - Shows running processes
+    top                     - Shows system resource usage
+    df [-h]                 - Shows disk usage
+    free [-h]               - Shows memory usage
+    uptime                  - Shows system uptime
 
     TEXT PROCESSING:
-    grep <pattern> <file> Search for pattern in file
-    wc <file>            Count lines, words, and characters
-    sort <file>          Sort lines in file
-    uniq <file>          Remove duplicate lines
+    head [file]             - Shows first 10 lines
+    tail [file]             - Shows last 10 lines
+    wc [file]               - Counts lines, words, characters
+    sort [file]             - Sorts file contents
+    uniq [file]             - Removes duplicate lines
 
-    SYSTEM INFO:
-    pwd                  Show current directory path
-    whoami              Display current username
-    date                Show current date and time
-    ps                  Display running processes
-    df                  Show filesystem usage
-    free                Show memory usage
-    uptime              Show system uptime
+    LINUX+ SPECIFIC COMMANDS:
+    grub2-install [device]  - Installs GRUB2 bootloader
+    grub2-mkconfig [-o]     - Generates GRUB config
+    update-grub             - Updates GRUB (Debian-based)
+    mkinitrd [args]         - Creates initrd image
+    dracut [args]           - Creates initramfs image
+    nmap [options] [host]   - Network scanning
+    systemctl [action] [service] - Service management
+    journalctl [options]    - View system logs
+    firewall-cmd [options]  - Firewall management
+    iptables [options]      - Advanced firewall rules
+    lsmod                   - Lists loaded kernel modules
+    modprobe [module]       - Loads kernel module
+    lsblk                   - Lists block devices
+    fdisk [options]         - Disk partitioning
+    mount [device] [point]  - Mounts filesystem
+    umount [device]         - Unmounts filesystem
 
-    UTILITIES:
-    echo "text"         Display text
-    find <path>         Find files and directories
-    history             Show command history
-    clear               Clear the terminal screen
-    help                Show this help message
-
-    ═══════════════════════════════════════════════════════════
+    ═══════════════════════════════════════════════════════════════════
 
     SAMPLE FILES: sample.txt, data.csv, notes.md, log.txt
 
-    EXAMPLES:
-    ls                  → List available files
-    cat sample.txt      → View sample file contents
-    grep INFO log.txt   → Search for "INFO" in log file
-    wc data.csv         → Count lines/words/chars in CSV
-    head -n 5 notes.md  → Show first 5 lines of notes
+    QUICK EXAMPLES:
+    ls                      → List files in current directory
+    cat sample.txt          → View sample file contents  
+    grep INFO log.txt       → Search for "INFO" in log file
+    systemctl status nginx  → Check nginx service status
+    nmap localhost          → Scan local machine ports
 
-    Educational Linux environment for safe command practice.
-    Note: This is a sandbox environment with limited functionality.
-    '''
+    This is a safe educational sandbox environment for practicing Linux commands.
+    Type any command above to get started with hands-on learning!'''
 
 def get_cli_playground():
     """Get CLI playground instance"""

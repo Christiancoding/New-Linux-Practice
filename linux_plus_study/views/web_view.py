@@ -191,21 +191,67 @@ class LinuxPlusStudyWeb:
                 commands.sort()
                 
                 command_descriptions = {
+                    # Basic File Operations
                     'ls': 'List directory contents',
                     'pwd': 'Print working directory',
                     'cd': 'Change directory',
-                    'echo': 'Display text',
                     'cat': 'Display file contents',
+                    'mkdir': 'Create directory',
+                    'touch': 'Create empty file',
+                    'rm': 'Remove file',
+                    'cp': 'Copy file',
+                    'mv': 'Move/rename file',
+                    
+                    # Text Processing & Search
+                    'grep': 'Search for pattern in file',
                     'head': 'Display first lines of file',
                     'tail': 'Display last lines of file',
-                    'grep': 'Search for pattern in file',
-                    'find': 'Find files',
                     'wc': 'Word, line, character count',
                     'sort': 'Sort lines in file',
                     'uniq': 'Remove duplicate lines',
-                    'date': 'Display current date',
+                    'echo': 'Display text',
+                    'find': 'Find files and directories',
+                    
+                    # System Information
                     'whoami': 'Display current user',
-                    'ps': 'Display running processes'
+                    'date': 'Display current date and time',
+                    'ps': 'Display running processes',
+                    'df': 'Show filesystem usage',
+                    'free': 'Show memory usage',
+                    'uptime': 'Show system uptime',
+                    'uname': 'Display system information',
+                    'top': 'Show system resource usage',
+                    
+                    # Interface & Utilities
+                    'help': 'Show available commands',
+                    'clear': 'Clear terminal screen',
+                    'history': 'Show command history',
+                    
+                    # Linux+ Boot & System Management
+                    'grub2-install': 'Install GRUB2 bootloader',
+                    'grub2-mkconfig': 'Generate GRUB configuration',
+                    'update-grub': 'Update GRUB configuration (Debian)',
+                    'mkinitrd': 'Create initial ramdisk image',
+                    'dracut': 'Create initramfs image',
+                    
+                    # Linux+ Service & Process Management  
+                    'systemctl': 'Control systemd services',
+                    'journalctl': 'View systemd journal logs',
+                    
+                    # Linux+ Network & Security
+                    'nmap': 'Network mapper and port scanner',
+                    'firewall-cmd': 'Firewall configuration utility',
+                    'iptables': 'Advanced firewall rules',
+                    
+                    # Linux+ Hardware & Modules
+                    'lsmod': 'List loaded kernel modules',
+                    'modprobe': 'Load/unload kernel modules',
+                    'lsblk': 'List block devices',
+                    'fdisk': 'Disk partitioning utility',
+                    
+                    # Linux+ Filesystem Operations
+                    'mount': 'Mount filesystem',
+                    'umount': 'Unmount filesystem'
                 }
                 
                 result = []
