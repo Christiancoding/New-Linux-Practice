@@ -425,12 +425,18 @@ What command lists files?
         importForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             
+            // Validate file is selected
+            if (!fileInput.files || fileInput.files.length === 0) {
+                showAlert('Please select a file to import.', 'error');
+                return;
+            }
+            
             const formData = new FormData(importForm);
             
             try {
                 importBtn.disabled = true;
                 importBtn.textContent = '⏳ Importing...';
-                showProgress(50);
+                showProgress(25);
                 hideAlert();
 
                 const response = await fetch('/import/questions', {
@@ -438,64 +444,132 @@ What command lists files?
                     body: formData
                 });
 
-                showProgress(100);
+                showProgress(75);
+                
+                // Check if response is OK
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
                 
                 const result = await response.json();
+                showProgress(100);
                 
-                // ENHANCED SUCCESS HANDLING WITH DUPLICATE DETECTION REPORTING
-                if (result.success) {
-                    let message = result.message;
+                // ENHANCED SUCCESS HANDLING WITH SAFE PROPERTY ACCESS
+                if (result && result.success === true) {
+                    let message = result.message || 'Questions imported successfully.';
                     
-                    // Enhanced reporting for duplicates
-                    if (result.duplicate_report && result.duplicate_report.duplicates_found > 0) {
-                        message += `\n\nDuplicate Detection Summary:`;
-                        message += `\n• Total processed: ${result.duplicate_report.total_processed}`;
-                        message += `\n• Duplicates found: ${result.duplicate_report.duplicates_found}`;
-                        message += `\n• Unique questions added: ${result.duplicate_report.unique_questions}`;
+                    // Safe access to duplicate_report properties
+                    if (result.duplicate_report && typeof result.duplicate_report === 'object') {
+                        const dupReport = result.duplicate_report;
+                        if (dupReport.duplicates_found > 0) {
+                            message += `\n\nDuplicate Detection Summary:`;
+                            message += `\n• Total processed: ${dupReport.total_processed || 0}`;
+                            message += `\n• Duplicates found: ${dupReport.duplicates_found || 0}`;
+                            message += `\n• Unique questions added: ${dupReport.unique_added || 0}`;
+                        }
                     }
                     
-                    showAlert(`✅ ${message}`, 'success');
-                    
-                    // Show detailed duplicate information if available
-                    if (result.duplicate_report && result.duplicate_report.duplicate_details.length > 0) {
-                        const duplicateDetails = result.duplicate_report.duplicate_details.slice(0, 5);
-                        let detailMessage = "Duplicate questions detected:\n";
-                        duplicateDetails.forEach(dup => {
-                            detailMessage += `\n• ${dup.type}: ${dup.question_text}`;
+                    // Show errors if any
+                    if (result.errors && Array.isArray(result.errors) && result.errors.length > 0) {
+                        message += `\n\nProcessing Notes:`;
+                        result.errors.slice(0, 5).forEach(error => {
+                            message += `\n• ${error}`;
                         });
-                        
-                        if (result.duplicate_report.duplicate_details.length > 5) {
-                            detailMessage += `\n... and ${result.duplicate_report.duplicate_details.length - 5} more`;
+                        if (result.errors.length > 5) {
+                            message += `\n• ... and ${result.errors.length - 5} more issues`;
                         }
-                        
-                        console.log(detailMessage);
                     }
                     
-                    // Enhanced reset functionality
+                    showAlert(message, 'success');
+                    
+                    // Reset form after success
                     setTimeout(() => {
-                        if (confirm('Import successful! Would you like to return to the main menu?')) {
-                            window.location.href = '/';
-                        } else {
-                            importForm.reset();
-                            fileInfo.classList.remove('show');
-                            importBtn.disabled = true;
-                            importBtn.textContent = '🔄 Import Questions';
-                            hideProgress();
-                            hideAlert();
-                        }
+                        window.location.href = '/';
                     }, 3000);
+                    
                 } else {
-                    showAlert(`❌ ${result.message}`, 'error');
-                    importBtn.disabled = false;
-                    importBtn.textContent = '🔄 Import Questions';
+                    // Handle failure case
+                    const errorMessage = (result && result.message) ? result.message : 'Unknown error occurred during import.';
+                    showAlert(`Import failed: ${errorMessage}`, 'error');
                 }
                 
             } catch (error) {
-                showAlert(`❌ Error importing file: ${error.message}`, 'error');
-                importBtn.disabled = false;
-                importBtn.textContent = '🔄 Import Questions';
+                console.error('Import error:', error);
+                showAlert(`Import failed: ${error.message}`, 'error');
             } finally {
-                setTimeout(() => hideProgress(), 1000);
+                // Always reset button state
+                setTimeout(() => {
+                    importBtn.disabled = false;
+                    importBtn.textContent = '🔄 Import Questions';
+                    hideProgress();
+                }, 1000);
+            }
+        });
+
+        // Enhanced file validation function
+        function handleFileSelection() {
+            const files = fileInput.files;
+            
+            // Safe check for files existence and length
+            if (!files || files.length === 0) {
+                fileInfo.classList.remove('show');
+                importBtn.disabled = true;
+                return;
+            }
+            
+            const file = files[0];
+            if (!file) {
+                fileInfo.classList.remove('show');
+                importBtn.disabled = true;
+                return;
+            }
+            
+            // Safe property access
+            fileName.textContent = file.name || 'Unknown file';
+            fileSize.textContent = formatFileSize(file.size || 0);
+            fileType.textContent = file.type || 'Unknown type';
+            
+            fileInfo.classList.add('show');
+            importBtn.disabled = false;
+
+            // Validate file type with safe string operations
+            const validExtensions = ['json', 'md'];
+            const filename = file.name || '';
+            const parts = filename.split('.');
+            
+            if (parts.length < 2) {
+                showAlert('File must have a valid extension (.json or .md)', 'error');
+                importBtn.disabled = true;
+                return;
+            }
+            
+            const fileExtension = parts[parts.length - 1].toLowerCase();
+            
+            if (!validExtensions.includes(fileExtension)) {
+                showAlert('Only JSON and Markdown (.md) files are supported.', 'error');
+                importBtn.disabled = true;
+            } else {
+                hideAlert();
+            }
+        }
+
+        // Enhanced drag and drop with better error handling
+        uploadSection.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadSection.classList.remove('dragover');
+            
+            try {
+                const files = e.dataTransfer.files;
+                if (files && files.length > 0) {
+                    // Create a new FileList-like object for the input
+                    fileInput.files = files;
+                    handleFileSelection();
+                } else {
+                    showAlert('No valid files were dropped.', 'error');
+                }
+            } catch (error) {
+                console.error('Drop error:', error);
+                showAlert('Error processing dropped file.', 'error');
             }
         });
     </script>

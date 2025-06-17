@@ -182,34 +182,75 @@ class QuestionManager:
         self.load_questions()
     
     def load_questions(self):
-        """Load questions from various sources."""
+        """Load questions from various sources with enhanced error reporting."""
         self.questions = []
+        total_loaded = 0
         
         # Start with sample questions from config
+        sample_count = 0
         for question_tuple in SAMPLE_QUESTIONS:
             try:
                 question = Question.from_tuple(question_tuple)
                 self.questions.append(question)
+                sample_count += 1
             except ValueError as e:
                 print(f"Warning: Invalid sample question skipped: {e}")
         
-        # Try to load additional questions from JSON file
-        try:
-            additional_questions = self._load_from_json_file("linux_plus_questions.json")
-            self.questions.extend(additional_questions)
-        except FileNotFoundError:
-            print("Info: No additional questions file found. Using built-in questions.")
-        except Exception as e:
-            print(f"Warning: Error loading additional questions: {e}")
+        if sample_count > 0:
+            print(f"✓ Loaded {sample_count} sample questions from config")
+            total_loaded += sample_count
         
-        # Try to load from data directory
-        try:
-            data_questions = self._load_from_json_file("data/questions.json")
-            self.questions.extend(data_questions)
-        except FileNotFoundError:
-            pass  # This is optional
-        except Exception as e:
-            print(f"Warning: Error loading data questions: {e}")
+        # Try to load additional questions from JSON file in root directory
+        json_files_to_try = [
+            "linux_plus_questions.json",
+            "data/questions.json",
+            os.path.join("data", "questions.json"),
+            "questions.json"
+        ]
+        
+        for json_file in json_files_to_try:
+            try:
+                if os.path.exists(json_file):
+                    print(f"📁 Found questions file: {json_file}")
+                    additional_questions = self._load_from_json_file(json_file)
+                    if additional_questions:
+                        self.questions.extend(additional_questions)
+                        print(f"✓ Loaded {len(additional_questions)} questions from {json_file}")
+                        total_loaded += len(additional_questions)
+                        break  # Stop after first successful load
+                    else:
+                        print(f"⚠️  File {json_file} exists but contains no valid questions")
+                else:
+                    print(f"📂 File not found: {json_file}")
+            except FileNotFoundError:
+                print(f"📂 File not found: {json_file}")
+                continue
+            except json.JSONDecodeError as e:
+                print(f"❌ JSON parsing error in {json_file}: {e}")
+                continue
+            except Exception as e:
+                print(f"❌ Error loading questions from {json_file}: {e}")
+                continue
+        
+        # Validate that we have questions loaded
+        if not self.questions:
+            print("❌ CRITICAL: No questions were loaded from any source!")
+            print("🔍 Checked locations:")
+            for json_file in json_files_to_try:
+                abs_path = os.path.abspath(json_file)
+                exists = "✓" if os.path.exists(json_file) else "✗"
+                print(f"   {exists} {abs_path}")
+            
+            # Create minimal fallback questions if none found
+            fallback_question = Question(
+                text="What is the Linux kernel?",
+                options=["The core of the Linux operating system", "A shell program", "A file manager", "A text editor"],
+                correct_index=0,
+                category="Linux Basics",
+                explanation="The Linux kernel is the core component that manages system resources."
+            )
+            self.questions.append(fallback_question)
+            print("🚨 Using fallback question to prevent crash")
         
         # Shuffle questions once on load for variety
         random.shuffle(self.questions)
@@ -217,7 +258,14 @@ class QuestionManager:
         # Update categories set
         self.categories = set(q.category for q in self.questions)
         
-        print(f"Loaded {len(self.questions)} questions across {len(self.categories)} categories.")
+        # Final status report
+        print(f"\n📊 Question Loading Summary:")
+        print(f"   Total questions loaded: {len(self.questions)}")
+        print(f"   Categories available: {len(self.categories)}")
+        print(f"   Categories: {', '.join(sorted(self.categories))}")
+        
+        if len(self.questions) < 10:
+            print(f"⚠️  Warning: Only {len(self.questions)} questions loaded. Consider adding more questions to data/questions.json")
     
     def _load_from_json_file(self, filename: str) -> List[Question]:
         """

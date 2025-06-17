@@ -565,218 +565,197 @@ class LinuxPlusStudyWeb:
             raise ValueError(f"Error parsing JSON content: {e}")
 
     def _parse_markdown_questions(self, content):
-        """
-        Enhanced markdown parser for Linux+ study format with comprehensive validation.
-        
-        Handles format:
-        **Q1.** (Category)
-        Question text
-        A. Option A
-        B. Option B
-        ...
-        
-        **A1.** C. Option text
-        *Explanation:* Detailed explanation
-        """
-        questions = []
-        lines = content.split('\n')
-        
-        # State tracking variables
-        in_questions_section = False
-        in_answers_section = False
-        current_question = None
-        current_options = []
-        answers_dict = {}
-        explanations_dict = {}
-        
-        # Enhanced parsing with robust error handling
-        i = 0
-        while i < len(lines):
-            line = lines[i].strip()
+            """
+            Enhanced markdown parser for Linux+ study format with comprehensive validation.
             
-            try:
-                # Section detection
-                if line == "# Questions":
-                    in_questions_section = True
-                    in_answers_section = False
-                    continue
-                elif line == "# Answers":
-                    in_questions_section = False
-                    in_answers_section = True
-                    continue
-                elif line == "---":
-                    in_questions_section = False
-                    continue
+            Handles format:
+            **Q1.** (Category)
+            Question text
+            A. Option A
+            B. Option B
+            ...
+            
+            **A1.** C. Option text
+            *Explanation:* Detailed explanation
+            """
+            questions = []
+            lines = content.split('\n')
+            
+            # State tracking variables
+            in_questions_section = False
+            in_answers_section = False
+            current_question = None
+            current_options = []
+            answers_dict = {}
+            explanations_dict = {}
+            
+            # Enhanced parsing with robust error handling
+            i = 0
+            while i < len(lines):
+                line = lines[i].strip()
                 
-                # Question parsing
-                elif in_questions_section and line.startswith("**Q"):
-                    # Save previous question if exists
-                    if current_question and current_options:
-                        questions.append({
-                            'question_number': current_question['number'],
-                            'question': current_question['text'],
-                            'options': current_options.copy(),
-                            'category': current_question['category'],
-                            'correct_answer_index': 0,  # Will be set from answers
-                            'explanation': ''  # Will be set from answers
-                        })
-                    
-                    # Parse new question header
-                    # Format: **Q1.** (Category)
-                    import re
-                    question_match = re.match(r'\*\*Q(\d+)\.\*\*\s*\(([^)]+)\)', line)
-                    if question_match:
-                        question_number = int(question_match.group(1))
-                        category = question_match.group(2).strip()
-                        
-                        # Get question text (next non-empty line)
+                try:
+                    # Section detection
+                    if line == "# Questions":
+                        in_questions_section = True
+                        in_answers_section = False
                         i += 1
-                        question_text = ""
-                        while i < len(lines) and lines[i].strip():
-                            question_line = lines[i].strip()
-                            # Stop if we hit an option
-                            if re.match(r'^[A-Z]\.\s', question_line):
-                                i -= 1  # Back up to process this line as option
-                                break
-                            question_text += " " + question_line if question_text else question_line
+                        continue
+                    elif line == "# Answers":
+                        in_questions_section = False
+                        in_answers_section = True
+                        i += 1
+                        continue
+                    elif line == "---":
+                        in_questions_section = False
+                        i += 1
+                        continue
+                    
+                    # Question parsing
+                    elif in_questions_section and line.startswith("**Q"):
+                        # Save previous question if exists
+                        if current_question and current_options:
+                            questions.append({
+                                'question_number': current_question['number'],
+                                'question': current_question['text'],
+                                'options': current_options.copy(),
+                                'category': current_question['category'],
+                                'correct_answer_index': 0,  # Will be set from answers
+                                'explanation': ''  # Will be set from answers
+                            })
+                        
+                        # Parse new question header
+                        # Format: **Q1.** (Category)
+                        import re
+                        match = re.match(r'\*\*Q(\d+)\.\*\*\s*\(([^)]*)\)', line)
+                        if match:
+                            question_number = int(match.group(1))
+                            category = match.group(2).strip()
+                            
+                            # Read question text (next line)
                             i += 1
+                            if i < len(lines):
+                                question_text = lines[i].strip()
+                                current_question = {
+                                    'number': question_number,
+                                    'text': question_text,
+                                    'category': category
+                                }
+                                current_options = []
                         
-                        current_question = {
-                            'number': question_number,
-                            'text': question_text.strip(),
-                            'category': category
-                        }
-                        current_options = []
-                
-                # Option parsing
-                elif in_questions_section and re.match(r'^[A-Z]\.\s', line):
-                    option_text = line[3:].strip()  # Remove "A. ", "B. ", etc.
-                    current_options.append(option_text)
-                
-                # Answer parsing
-                elif in_answers_section and line.startswith("**A"):
-                    # Format: **A1.** C. Option text
-                    answer_match = re.match(r'\*\*A(\d+)\.\*\*\s*([A-Z])\.\s*(.*)', line)
-                    if answer_match:
-                        answer_number = int(answer_match.group(1))
-                        correct_letter = answer_match.group(2)
-                        correct_index = ord(correct_letter) - ord('A')
-                        answers_dict[answer_number] = correct_index
-                        
-                        # Look for explanation on following lines
-                        explanation = ""
-                        j = i + 1
-                        while j < len(lines):
-                            next_line = lines[j].strip()
-                            if next_line.startswith("*Explanation:*"):
-                                # Extract explanation text
-                                explanation = next_line.replace("*Explanation:*", "").strip()
-                                j += 1
-                                # Continue reading explanation lines
-                                while j < len(lines):
-                                    exp_line = lines[j].strip()
-                                    if exp_line.startswith("**A") or exp_line.startswith("**Q") or not exp_line:
-                                        break
-                                    explanation += " " + exp_line
+                    # Option parsing
+                    elif in_questions_section and current_question and re.match(r'^\s*[A-Z]\.\s*', line):
+                        option_text = re.sub(r'^\s*[A-Z]\.\s*', '', line).strip()
+                        if option_text:
+                            current_options.append(option_text)
+                    
+                    # Answer parsing
+                    elif in_answers_section and line.startswith("**A"):
+                        # Format: **A1.** C. Option text
+                        import re
+                        match = re.match(r'\*\*A(\d+)\.\*\*\s*([A-Z])\.\s*(.*)', line)
+                        if match:
+                            answer_number = int(match.group(1))
+                            correct_letter = match.group(2)
+                            correct_option_text = match.group(3).strip()
+                            
+                            # Convert letter to index (A=0, B=1, etc.)
+                            correct_index = ord(correct_letter) - ord('A')
+                            answers_dict[answer_number] = correct_index
+                            
+                            # Look for explanation in next lines
+                            explanation_lines = []
+                            j = i + 1
+                            while j < len(lines):
+                                next_line = lines[j].strip()
+                                if next_line.startswith('*Explanation:*'):
                                     j += 1
-                                break
-                            elif next_line.startswith("**A") or not next_line:
-                                break
-                            j += 1
-                        
-                        explanations_dict[answer_number] = explanation.strip()
+                                    while j < len(lines) and not lines[j].strip().startswith('**A'):
+                                        explanation_lines.append(lines[j].strip())
+                                        j += 1
+                                    break
+                                elif next_line.startswith('**A'):
+                                    break
+                                j += 1
+                            
+                            if explanation_lines:
+                                explanations_dict[answer_number] = '\n'.join(explanation_lines).strip()
+                    
+                    i += 1
+                    
+                except Exception as e:
+                    print(f"Warning: Error parsing line {i}: {line[:50]}... - {str(e)}")
+                    i += 1
+                    continue
             
-            except Exception as e:
-                print(f"Warning: Error parsing line {i}: '{line}': {e}")
+            # Save last question if exists
+            if current_question and current_options:
+                questions.append({
+                    'question_number': current_question['number'],
+                    'question': current_question['text'],
+                    'options': current_options.copy(),
+                    'category': current_question['category'],
+                    'correct_answer_index': 0,
+                    'explanation': ''
+                })
             
-            i += 1
-        
-        # Add final question if exists
-        if current_question and current_options:
-            questions.append({
-                'question_number': current_question['number'],
-                'question': current_question['text'],
-                'options': current_options.copy(),
-                'category': current_question['category'],
-                'correct_answer_index': 0,
-                'explanation': ''
-            })
-        
-        # Apply answers and explanations
-        for question in questions:
-            question_num = question['question_number']
-            if question_num in answers_dict:
-                question['correct_answer_index'] = answers_dict[question_num]
-            if question_num in explanations_dict:
-                question['explanation'] = explanations_dict[question_num]
-        
-        return questions
+            # Apply answers and explanations
+            for question in questions:
+                q_num = question['question_number']
+                if q_num in answers_dict:
+                    question['correct_answer_index'] = answers_dict[q_num]
+                if q_num in explanations_dict:
+                    question['explanation'] = explanations_dict[q_num]
+            
+            return questions
 
-    def _detect_and_eliminate_duplicates(self, new_questions, existing_questions=None):
+    def _detect_and_eliminate_duplicates(self, imported_questions):
         """
-        Comprehensive duplicate detection and elimination system.
+        Detect and eliminate duplicate questions based on question text similarity.
         
         Args:
-            new_questions (list): Questions being imported
-            existing_questions (list): Current questions in the system
+            imported_questions (List[dict]): List of imported questions
             
         Returns:
-            tuple: (filtered_questions, duplicate_report)
+            Tuple[List[dict], dict]: (filtered_questions, duplicate_report)
         """
-        if existing_questions is None:
-            existing_questions = self.game_state.questions
+        existing_questions = [q[0] if isinstance(q, (list, tuple)) else q.get('text', '') 
+                            for q in self.game_state.questions]
         
-        # Convert existing questions to comparable format
-        existing_set = set()
-        for q_data in existing_questions:
-            if len(q_data) >= 5:
-                question_text, options, _, category, _ = q_data
-                # Create normalized signature
-                signature = self._create_question_signature(question_text, options, category)
-                existing_set.add(signature)
+        unique_questions = []
+        duplicates_found = 0
+        total_processed = len(imported_questions)
         
-        # Process new questions for duplicates
-        filtered_questions = []
-        duplicates_found = []
-        internal_duplicates = set()
-        
-        for i, question in enumerate(new_questions):
-            signature = self._create_question_signature(
-                question['question'], 
-                question['options'], 
-                question['category']
-            )
+        for question in imported_questions:
+            question_text = question.get('question', '').strip().lower()
             
             # Check against existing questions
-            if signature in existing_set:
-                duplicates_found.append({
-                    'type': 'existing_duplicate',
-                    'question_number': i + 1,
-                    'question_text': question['question'][:100] + '...' if len(question['question']) > 100 else question['question']
-                })
-                continue
+            is_duplicate = False
+            for existing_text in existing_questions:
+                if self._is_similar_question(question_text, existing_text.lower()):
+                    is_duplicate = True
+                    break
             
-            # Check for internal duplicates within import
-            if signature in internal_duplicates:
-                duplicates_found.append({
-                    'type': 'internal_duplicate',
-                    'question_number': i + 1,
-                    'question_text': question['question'][:100] + '...' if len(question['question']) > 100 else question['question']
-                })
-                continue
+            # Check against already processed questions in this import
+            if not is_duplicate:
+                for processed_question in unique_questions:
+                    if self._is_similar_question(question_text, 
+                                               processed_question.get('question', '').strip().lower()):
+                        is_duplicate = True
+                        break
             
-            # Question is unique
-            internal_duplicates.add(signature)
-            filtered_questions.append(question)
+            if is_duplicate:
+                duplicates_found += 1
+            else:
+                unique_questions.append(question)
         
         duplicate_report = {
-            'total_processed': len(new_questions),
-            'duplicates_found': len(duplicates_found),
-            'unique_questions': len(filtered_questions),
-            'duplicate_details': duplicates_found
+            'total_processed': total_processed,
+            'duplicates_found': duplicates_found,
+            'unique_added': len(unique_questions)
         }
         
-        return filtered_questions, duplicate_report
+        return unique_questions, duplicate_report
 
     def _create_question_signature(self, question_text, options, category):
         """
@@ -815,7 +794,7 @@ class LinuxPlusStudyWeb:
 
     def _normalize_question_dict(self, question_dict):
         """
-        Normalize question dictionary to standard format with validation.
+        Normalize a question dictionary to standard format.
         
         Args:
             question_dict (dict): Raw question dictionary
@@ -823,121 +802,144 @@ class LinuxPlusStudyWeb:
         Returns:
             dict: Normalized question dictionary
         """
-        try:
-            # Handle different possible field names
-            question_text = (
-                question_dict.get('question') or 
-                question_dict.get('question_text') or 
-                question_dict.get('text') or 
-                ''
-            )
+        # Handle different key variations
+        question_text = (
+            question_dict.get('question') or 
+            question_dict.get('text') or 
+            question_dict.get('question_text', '')
+        ).strip()
+        
+        options = question_dict.get('options', [])
+        if not isinstance(options, list):
+            options = []
+        
+        # Handle different correct answer formats
+        correct_index = 0
+        if 'correct_answer_index' in question_dict:
+            correct_index = int(question_dict['correct_answer_index'])
+        elif 'correct_answer' in question_dict:
+            # Try to convert correct_answer to index
+            correct_answer = question_dict['correct_answer']
+            if isinstance(correct_answer, str) and len(correct_answer) == 1:
+                # Convert letter to index (A=0, B=1, etc.)
+                correct_index = ord(correct_answer.upper()) - ord('A')
+            elif isinstance(correct_answer, (int, str)):
+                correct_index = int(correct_answer)
+        
+        category = question_dict.get('category', 'General').strip()
+        explanation = question_dict.get('explanation', '').strip()
+        
+        return {
+            'question': question_text,
+            'options': options,
+            'correct_answer_index': correct_index,
+            'category': category,
+            'explanation': explanation
+        }
+
+    def _is_similar_question(self, text1, text2, threshold=0.8):
+        """
+        Check if two question texts are similar enough to be considered duplicates.
+        
+        Args:
+            text1 (str): First question text
+            text2 (str): Second question text
+            threshold (float): Similarity threshold (0.0 to 1.0)
             
-            options = (
-                question_dict.get('options') or 
-                question_dict.get('choices') or 
-                question_dict.get('answers') or 
-                []
-            )
+        Returns:
+            bool: True if questions are similar enough to be duplicates
+        """
+        if not text1 or not text2:
+            return False
             
-            # Handle different correct answer formats
-            correct_answer_index = 0
-            if 'correct_answer_index' in question_dict:
-                correct_answer_index = int(question_dict['correct_answer_index'])
-            elif 'correct_index' in question_dict:
-                correct_answer_index = int(question_dict['correct_index'])
-            elif 'correct_answer' in question_dict:
-                # Try to find the index of the correct answer
-                correct_answer = question_dict['correct_answer']
-                if isinstance(correct_answer, str) and len(correct_answer) == 1 and correct_answer.isalpha():
-                    # Letter format (A, B, C, D)
-                    correct_answer_index = ord(correct_answer.upper()) - ord('A')
-                elif isinstance(correct_answer, str) and correct_answer in options:
-                    # Full text match
-                    correct_answer_index = options.index(correct_answer)
+        # Simple similarity check - can be enhanced with more sophisticated algorithms
+        # Remove common words and punctuation for comparison
+        import re
+        
+        def clean_text(text):
+            # Remove punctuation and extra spaces
+            text = re.sub(r'[^\w\s]', ' ', text.lower())
+            # Remove common words
+            common_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'what', 'which', 'how', 'when', 'where', 'why'}
+            words = [word for word in text.split() if word not in common_words and len(word) > 2]
+            return ' '.join(words)
+        
+        clean1 = clean_text(text1)
+        clean2 = clean_text(text2)
+        
+        if not clean1 or not clean2:
+            return text1.strip() == text2.strip()
+        
+        # Calculate Jaccard similarity
+        words1 = set(clean1.split())
+        words2 = set(clean2.split())
+        
+        if not words1 and not words2:
+            return True
+        
+        intersection = len(words1.intersection(words2))
+        union = len(words1.union(words2))
+        
+        if union == 0:
+            return False
             
-            # Validate correct_answer_index
-            if not (0 <= correct_answer_index < len(options)) and options:
-                correct_answer_index = 0
-            
-            category = (
-                question_dict.get('category') or 
-                question_dict.get('topic') or 
-                question_dict.get('subject') or 
-                'General'
-            )
-            
-            explanation = (
-                question_dict.get('explanation') or 
-                question_dict.get('rationale') or 
-                question_dict.get('details') or 
-                ''
-            )
-            
-            return {
-                'question': str(question_text),
-                'options': [str(opt) for opt in options],
-                'correct_answer_index': correct_answer_index,
-                'category': str(category),
-                'explanation': str(explanation)
-            }
-            
-        except Exception as e:
-            print(f"Warning: Error normalizing question: {e}")
-            return {
-                'question': str(question_dict.get('question', 'Invalid question')),
-                'options': ['A', 'B', 'C', 'D'],
-                'correct_answer_index': 0,
-                'category': 'General',
-                'explanation': ''
-            }
+        similarity = intersection / union
+        return similarity >= threshold
 
     def _add_question_to_pool(self, question_tuple):
         """
-        Add a question tuple to the current question pool with enhanced integration.
+        Add a question tuple to the game state question pool.
         
         Args:
-            question_tuple (tuple): Question data in tuple format
+            question_tuple (tuple): Question in tuple format
+                                   (text, options, correct_index, category, explanation)
+            
+        Returns:
+            bool: True if question was added successfully
         """
         try:
-            # Method 1: Try using question manager if available
-            if hasattr(self.game_state, 'question_manager') and self.game_state.question_manager:
+            # Validate tuple format
+            if not isinstance(question_tuple, (tuple, list)) or len(question_tuple) < 4:
+                return False
+            
+            text, options, correct_index, category = question_tuple[:4]
+            explanation = question_tuple[4] if len(question_tuple) > 4 else ""
+            
+            # Validate question data
+            if not text or not text.strip():
+                return False
+            
+            if not options or len(options) < 2:
+                return False
+            
+            if not (0 <= correct_index < len(options)):
+                return False
+            
+            if not category or not category.strip():
+                category = "General"
+            
+            # Add to game state
+            validated_tuple = (text.strip(), list(options), int(correct_index), 
+                             category.strip(), explanation.strip())
+            
+            # Add to questions list
+            self.game_state.questions.append(validated_tuple)
+            
+            # Update categories
+            self.game_state.categories.add(category.strip())
+            
+            # Update question manager if it exists
+            if hasattr(self.game_state, 'question_manager'):
                 from models.question import Question
-                try:
-                    question_obj = Question.from_tuple(question_tuple)
-                    self.game_state.question_manager.add_question(question_obj)
-                    return True
-                except Exception as e:
-                    print(f"Warning: Question manager failed: {e}")
+                question_obj = Question(text.strip(), list(options), int(correct_index), 
+                                      category.strip(), explanation.strip())
+                self.game_state.question_manager.questions.append(question_obj)
+                self.game_state.question_manager.categories.add(category.strip())
             
-            # Method 2: Direct integration with game state
-            if hasattr(self.game_state, 'questions'):
-                # Ensure questions is a list
-                if not isinstance(self.game_state.questions, list):
-                    self.game_state.questions = list(self.game_state.questions)
-                
-                # Add the new question
-                self.game_state.questions.append(question_tuple)
-                
-                # Update categories if possible
-                if hasattr(self.game_state, 'categories') and len(question_tuple) > 3:
-                    if isinstance(self.game_state.categories, set):
-                        self.game_state.categories.add(question_tuple[3])
-                    elif isinstance(self.game_state.categories, list):
-                        if question_tuple[3] not in self.game_state.categories:
-                            self.game_state.categories.append(question_tuple[3])
-                
-                return True
-            
-            # Method 3: Fallback - store in temporary container
-            if not hasattr(self.game_state, '_imported_questions'):
-                self.game_state._imported_questions = []
-            self.game_state._imported_questions.append(question_tuple)
-            
-            print(f"Warning: Question added to temporary storage. Manual integration may be required.")
             return True
             
         except Exception as e:
-            print(f"Error adding question to pool: {e}")
+            print(f"Error adding question to pool: {str(e)}")
             return False
     def _simulate_command(self, command):
         """Simulate common commands with educational examples"""
