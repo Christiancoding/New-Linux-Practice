@@ -4,7 +4,8 @@ Configuration constants for the Linux+ Study Game.
 """
 
 import sys
-import tkinter.font as tkFont
+import os
+from pathlib import Path
 
 # --- File Constants ---
 HISTORY_FILE = "linux_plus_history.json"
@@ -27,6 +28,23 @@ QUICK_FIRE_TIME_LIMIT = 180  # 3 minutes in seconds
 # --- Mini Quiz Constants ---
 MINI_QUIZ_QUESTIONS = 3
 MINI_QUIZ_TIME_LIMIT = 30  # 30 seconds
+# Project structure paths
+PROJECT_ROOT = Path(__file__).parent.parent
+DATA_DIR = PROJECT_ROOT / "data"
+TEMPLATES_DIR = PROJECT_ROOT / "templates"
+STATIC_DIR = PROJECT_ROOT / "static"
+UTILS_DIR = PROJECT_ROOT / "utils"
+
+# Data file paths
+QUESTIONS_FILE = DATA_DIR / "questions.json"
+ACHIEVEMENTS_FILE = PROJECT_ROOT / "linux_plus_achievements.json"
+HISTORY_FILE = PROJECT_ROOT / "linux_plus_history.json"
+WEB_SETTINGS_FILE = PROJECT_ROOT / "web_settings.json"
+
+# Application modes (GUI mode removed)
+SUPPORTED_MODES = ["cli", "web"]
+DEFAULT_MODE = "cli"
+
 
 # --- Colorama Setup (CLI Colors) ---
 try:
@@ -109,54 +127,6 @@ except ImportError:
     COLOR_WELCOME_BORDER, COLOR_WELCOME_TEXT, COLOR_WELCOME_TITLE = "", "", ""
     COLOR_RESET = ""
 
-# --- GUI Color Scheme ---
-GUI_COLORS = {
-    "bg": "#2B2B2B",          # Dark background
-    "fg": "#D3D3D3",          # Light grey text
-    "bg_widget": "#3C3F41",   # Slightly lighter background for widgets
-    "fg_header": "#A9B7C6",   # Lighter text for headers
-    "accent": "#FFC66D",      # Amber/Yellow accent
-    "accent_dark": "#E8A44C",
-    "button": "#4E5254",      # Darker button background
-    "button_fg": "#D4D4D4",   # Light button text
-    "button_hover": "#5F6365",
-    "button_disabled_bg": "#3C3F41",
-    "correct": "#6A8759",     # Muted green
-    "incorrect": "#AC4142",   # Muted red
-    "explanation_bg": "#313335",
-    "border": "#555555",
-    "disabled_fg": "#888888",
-    "status_fg": "#BBBBBB",
-    "category_fg": "#808080",
-    "dim": "#888888",
-    "welcome_title": "#FFC66D",
-    "welcome_text": "#D3D3D3",
-    "streak": "#6897BB",
-}
-
-# --- GUI Font Configuration ---
-def get_gui_fonts():
-    """Returns a dictionary of fonts for GUI components."""
-    try:
-        return {
-            "base": tkFont.Font(family="Segoe UI", size=10),
-            "bold": tkFont.Font(family="Segoe UI", size=10, weight="bold"),
-            "header": tkFont.Font(family="Segoe UI", size=16, weight="bold"),
-            "subheader": tkFont.Font(family="Segoe UI", size=12, weight="bold"),
-            "italic": tkFont.Font(family="Segoe UI", size=9, slant="italic"),
-            "question": tkFont.Font(family="Segoe UI", size=12),
-            "option": tkFont.Font(family="Segoe UI", size=11),
-            "feedback": tkFont.Font(family="Segoe UI", size=11, weight="bold"),
-            "explanation": tkFont.Font(family="Consolas", size=10),
-            "stats": tkFont.Font(family="Consolas", size=10),
-            "button": tkFont.Font(family="Segoe UI", size=10, weight="bold"),
-            "welcome_title": tkFont.Font(family="Segoe UI", size=14, weight="bold"),
-            "welcome_text": tkFont.Font(family="Segoe UI", size=11),
-        }
-    except Exception as e:
-        print(f"Warning: Could not create custom fonts: {e}")
-        return {}
-
 # --- Sample Questions Data ---
 SAMPLE_QUESTIONS = [
     (
@@ -166,3 +136,215 @@ SAMPLE_QUESTIONS = [
         "`grub2-install` installs the GRUB2 bootloader files to the appropriate location and typically installs the boot code to the MBR or EFI partition. Example: `grub2-install /dev/sda` (for BIOS systems) or `grub2-install --target=x86_64-efi --efi-directory=/boot/efi` (for UEFI systems)."
     )
 ]
+# CLI Configuration Settings
+CLI_SETTINGS = {
+    "welcome_message": "Welcome to Linux Plus Study Tool",
+    "prompt_symbol": ">>> ",
+    "clear_screen": True,
+    "show_progress_bar": True,
+    "colored_output": True,
+    "max_menu_options": 10,
+    "input_timeout": 300,  # 5 minutes
+}
+
+# Web Configuration Settings
+WEB_SETTINGS = {
+    "default_host": "127.0.0.1",
+    "default_port": 5000,
+    "debug_mode": False,
+    "threaded": True,
+    "template_auto_reload": True,
+    "session_timeout": 3600,  # 1 hour
+    "max_content_length": 16 * 1024 * 1024,  # 16MB
+}
+
+# Quiz Configuration
+QUIZ_SETTINGS = {
+    "default_question_count": 10,
+    "max_question_count": 50,
+    "min_question_count": 1,
+    "shuffle_questions": True,
+    "shuffle_options": True,
+    "show_immediate_feedback": True,
+    "allow_review": True,
+}
+
+# Achievement System Configuration
+ACHIEVEMENT_SETTINGS = {
+    "points_per_correct": 10,
+    "bonus_streak_multiplier": 1.5,
+    "streak_threshold": 5,
+    "daily_challenge_bonus": 50,
+    "perfect_quiz_bonus": 25,
+}
+
+# Scoring and Statistics
+SCORING_SETTINGS = {
+    "passing_percentage": 70,
+    "excellent_percentage": 90,
+    "streak_bonus_threshold": 10,
+    "leaderboard_max_entries": 100,
+}
+
+# Question Categories (Linux Plus specific)
+QUESTION_CATEGORIES = [
+    "Hardware and System Configuration",
+    "Systems Operation and Maintenance", 
+    "Security",
+    "Linux Troubleshooting and Diagnostics",
+    "Automation and Scripting",
+]
+
+# Difficulty Levels
+DIFFICULTY_LEVELS = ["Beginner", "Intermediate", "Advanced", "Expert"]
+
+# File validation settings
+FILE_VALIDATION = {
+    "max_file_size": 50 * 1024 * 1024,  # 50MB
+    "allowed_extensions": [".json", ".txt", ".csv"],
+    "encoding": "utf-8",
+}
+
+# Logging Configuration
+LOGGING_SETTINGS = {
+    "log_level": "INFO",
+    "log_file": PROJECT_ROOT / "app.log",
+    "max_log_size": 10 * 1024 * 1024,  # 10MB
+    "backup_count": 5,
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+}
+
+# Error Messages
+ERROR_MESSAGES = {
+    "file_not_found": "Required file not found: {filename}",
+    "invalid_mode": "Invalid mode. Supported modes: {modes}",
+    "no_questions": "No questions available for the selected category",
+    "invalid_answer": "Invalid answer format. Please try again.",
+    "network_error": "Network connection error. Please check your connection.",
+    "permission_error": "Permission denied. Check file permissions.",
+}
+
+# Success Messages  
+SUCCESS_MESSAGES = {
+    "quiz_completed": "Quiz completed successfully!",
+    "achievement_unlocked": "Achievement unlocked: {achievement}",
+    "stats_cleared": "Statistics cleared successfully",
+    "file_saved": "File saved successfully: {filename}",
+}
+
+# Development and Debug Settings
+DEBUG_SETTINGS = {
+    "verbose_logging": False,
+    "show_sql_queries": False,
+    "profile_performance": False,
+    "mock_data": False,
+}
+
+# API Configuration (for potential future web API)
+API_SETTINGS = {
+    "version": "v1",
+    "rate_limit": 100,  # requests per minute
+    "cors_enabled": False,
+    "authentication_required": False,
+}
+
+# User Interface Constants
+UI_CONSTANTS = {
+    "page_title": "Linux Plus Study Tool",
+    "app_version": "2.0.0",
+    "copyright": "© 2024 Linux Plus Study Tool",
+    "support_email": "support@linuxplus.example.com",
+}
+
+# Performance Settings
+PERFORMANCE_SETTINGS = {
+    "cache_questions": True,
+    "cache_timeout": 3600,  # 1 hour
+    "lazy_loading": True,
+    "pagination_size": 20,
+}
+
+def get_config_value(section, key, default=None):
+    """
+    Retrieve a configuration value from the specified section.
+    
+    Args:
+        section (str): Configuration section name
+        key (str): Configuration key
+        default: Default value if key not found
+        
+    Returns:
+        Configuration value or default
+    """
+    config_sections = {
+        "cli": CLI_SETTINGS,
+        "web": WEB_SETTINGS,
+        "quiz": QUIZ_SETTINGS,
+        "achievements": ACHIEVEMENT_SETTINGS,
+        "scoring": SCORING_SETTINGS,
+        "logging": LOGGING_SETTINGS,
+        "debug": DEBUG_SETTINGS,
+        "api": API_SETTINGS,
+        "ui": UI_CONSTANTS,
+        "performance": PERFORMANCE_SETTINGS,
+    }
+    
+    section_config = config_sections.get(section, {})
+    return section_config.get(key, default)
+
+def validate_mode(mode):
+    """
+    Validate if the provided mode is supported.
+    
+    Args:
+        mode (str): Application mode to validate
+        
+    Returns:
+        bool: True if mode is supported, False otherwise
+    """
+    return mode in SUPPORTED_MODES
+
+def get_file_path(file_type):
+    """
+    Get the full file path for a specific file type.
+    
+    Args:
+        file_type (str): Type of file (questions, achievements, history, etc.)
+        
+    Returns:
+        Path: Full path to the specified file
+    """
+    file_paths = {
+        "questions": QUESTIONS_FILE,
+        "achievements": ACHIEVEMENTS_FILE,
+        "history": HISTORY_FILE,
+        "web_settings": WEB_SETTINGS_FILE,
+    }
+    
+    return file_paths.get(file_type)
+
+def ensure_directories():
+    """
+    Ensure all required directories exist.
+    Create them if they don't exist.
+    """
+    directories = [
+        DATA_DIR,
+        TEMPLATES_DIR,
+        STATIC_DIR,
+        STATIC_DIR / "css",
+        STATIC_DIR / "js",
+    ]
+    
+    for directory in directories:
+        directory.mkdir(parents=True, exist_ok=True)
+
+# Environment-specific overrides
+if os.getenv("FLASK_ENV") == "development":
+    WEB_SETTINGS["debug_mode"] = True
+    DEBUG_SETTINGS["verbose_logging"] = True
+
+if os.getenv("PRODUCTION") == "true":
+    WEB_SETTINGS["debug_mode"] = False
+    DEBUG_SETTINGS["verbose_logging"] = False
+    LOGGING_SETTINGS["log_level"] = "WARNING"

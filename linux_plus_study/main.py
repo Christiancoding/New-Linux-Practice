@@ -8,15 +8,17 @@ featuring both CLI and GUI interfaces with gamification elements.
 
 import sys
 import traceback
-import tkinter as tk
+# Ensure the script is run with Python 3
+if sys.version_info < (3, 0):
+    print("This script requires Python 3. Please run with python3.")
+    sys.exit(1)
+import os
 
 # Import configuration and utilities
 from utils.config import *
 from models.game_state import GameState
 from views.cli_view import LinuxPlusStudyCLI
-from views.gui_view import LinuxPlusStudyGUI
 import views.cli_view as cli_view
-import views.gui_view as gui_view
 from views.web_view import LinuxPlusStudyWeb
 
 def detect_interface_preference():
@@ -24,14 +26,12 @@ def detect_interface_preference():
     Detect if we should force CLI mode based on environment or arguments.
     
     Returns:
-        str: 'cli', 'gui', or 'ask' for user choice
+        str: 'cli', or 'ask' for user choice
     """
     # Check for command line arguments
     if len(sys.argv) > 1:
         arg = sys.argv[1].lower()
-        if arg == 'gui':
-            return 'gui'
-        elif arg == 'cli':
+        if arg == 'cli':
             return 'cli'
     
     # Detect non-interactive environment
@@ -43,24 +43,24 @@ def detect_interface_preference():
 
 def get_user_interface_choice_with_web():
     """
-    Prompt user to choose between CLI, GUI, and Web interfaces.
+    Prompt user to choose between CLI orWeb interfaces.
     
     Returns:
-        str: 'cli', 'gui', or 'web'
+        str: 'cli', or 'web'
     """
     while True:
         try:
-            prompt_text = f"{COLOR_PROMPT}Choose interface ({COLOR_OPTIONS}CLI{COLOR_PROMPT}, {COLOR_OPTIONS}GUI{COLOR_PROMPT}, or {COLOR_OPTIONS}WEB{COLOR_PROMPT}): {COLOR_INPUT}"
+            prompt_text = f"{COLOR_PROMPT}Choose interface ({COLOR_OPTIONS}CLI{COLOR_PROMPT} or {COLOR_OPTIONS}WEB{COLOR_PROMPT}): {COLOR_INPUT}"
             print(prompt_text, end='')
             sys.stdout.flush()
             
             choice = input().lower().strip()
             print(COLOR_RESET, end='')
             
-            if choice in ['cli', 'gui', 'web']:
+            if choice in ['cli', 'web']:
                 return choice
             else:
-                print(f"{COLOR_INFO} Invalid choice. Please type 'cli', 'gui', or 'web'. {COLOR_RESET}")
+                print(f"{COLOR_INFO} Invalid choice. Please type 'cli', or 'web'. {COLOR_RESET}")
                 
         except EOFError:
             print(f"\n{COLOR_ERROR} Input interrupted. Defaulting to CLI. {COLOR_RESET}")
@@ -88,7 +88,7 @@ def get_user_interface_choice():
             if choice in ['cli', 'gui']:
                 return choice
             else:
-                print(f"{COLOR_INFO} Invalid choice. Please type 'cli' or 'gui'. {COLOR_RESET}")
+                print(f"{COLOR_INFO} Invalid choice. Please type 'cli' or 'web'. {COLOR_RESET}")
                 
         except EOFError:
             print(f"\n{COLOR_ERROR} Input interrupted. Defaulting to CLI. {COLOR_RESET}")
@@ -130,37 +130,6 @@ def launch_gui_interface(game_state):
     Args:
         game_state: GameState instance
     """
-    try:
-        root = tk.Tk()
-        gui_view = LinuxPlusStudyGUI(root, game_state)
-        
-        # Ensure proper cleanup on window close
-        def on_closing():
-            gui_view.quit_app()
-        
-        root.protocol("WM_DELETE_WINDOW", on_closing)
-        root.mainloop()
-        
-    except tk.TclError as e:
-        print(f"Error: Failed to initialize Tkinter GUI.")
-        print(f"This might happen if you are running in an environment without a display server.")
-        print(f"Try running in CLI mode instead: python {sys.argv[0]} cli")
-        print(f"Error details: {e}")
-        
-        # Attempt to save before exiting
-        game_state.save_history()
-        game_state.save_achievements()
-        sys.exit(1)
-        
-    except Exception as e:
-        print(f"\nAn unexpected error occurred launching the GUI: {e}")
-        print("Error details:")
-        traceback.print_exc()
-        print("Attempting to save progress...")
-        game_state.save_history()
-        game_state.save_achievements()
-        sys.exit(1)
-
 def launch_web_interface(game_state):
     """
     Launch the Web interface.
@@ -223,8 +192,6 @@ def main():
     
     if interface_choice == 'web':
         launch_web_interface(game_state)
-    elif interface_choice == 'gui':
-        launch_gui_interface(game_state)
     else:
         launch_cli_interface(game_state)
 
