@@ -411,12 +411,13 @@ body {
         repeating-linear-gradient(
             0deg,
             transparent,
-            transparent 2px,
-            rgba(0, 255, 65, 0.03) 2px,
-            rgba(0, 255, 65, 0.03) 4px
+            transparent 3px,
+            rgba(0, 255, 65, 0.02) 3px,
+            rgba(0, 255, 65, 0.02) 4px
         );
     pointer-events: none;
-    animation: scan-line 0.1s linear infinite;
+    animation: scan-line never infinite;
+    will-change: transform;
 }
 
 @keyframes scan-line {
