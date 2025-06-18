@@ -68,7 +68,7 @@ Werkzeug >= 2.0.0
 
 1. **Repository Clone and Setup**
 ```bash
-git clone https://github.com/Christiancoding/New-Linux-Practice.git
+git clone <repository-url>
 cd linux_plus_study
 ```
 
