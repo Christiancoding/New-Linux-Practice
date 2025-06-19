@@ -11,7 +11,6 @@ import random
 import hashlib
 from datetime import datetime
 from utils.config import *
-from models.question import QuestionManager, Question
 
 
 class QuizController:
@@ -139,8 +138,7 @@ class QuizController:
             return self.get_daily_challenge_question()
         
         # Regular question selection
-        question_data = self.game_state.select_question(category_filter)
-        original_index = -1  # Default value since we don't track original index in the new implementation
+        question_data, original_index = self.game_state.select_question(category_filter)
         
         if question_data is not None:
             result = {
@@ -239,16 +237,7 @@ class QuizController:
         if not self.quiz_active or len(question_data) < 5:
             return {'error': 'Invalid quiz state or question data'}
         
-        # Handle both dictionary and tuple formats for backward compatibility
-        if isinstance(question_data, dict):
-            q_text = question_data.get('question_text', question_data.get('question', ''))
-            options = question_data.get('options', [])
-            correct_answer_index = question_data.get('correct_answer_index', 0)
-            category = question_data.get('category', 'General')
-            explanation = question_data.get('explanation', '')
-        else:
-            # Legacy tuple format
-            q_text, options, correct_answer_index, category, explanation = question_data
+        q_text, options, correct_answer_index, category, explanation = question_data
         is_correct = (user_answer_index == correct_answer_index)
         
         # Update streak
@@ -401,10 +390,7 @@ class QuizController:
         if not self.quick_fire_active:
             return {'active': False}
         
-        if self.quick_fire_start_time is not None:
-            elapsed_time = time.time() - self.quick_fire_start_time if self.quick_fire_start_time is not None else 0
-        else:
-            elapsed_time = 0
+        elapsed_time = time.time() - self.quick_fire_start_time
         time_remaining = max(0, QUICK_FIRE_TIME_LIMIT - elapsed_time)
         questions_remaining = max(0, QUICK_FIRE_QUESTIONS - self.quick_fire_questions_answered)
         
@@ -414,7 +400,7 @@ class QuizController:
         
         if time_up or questions_complete:
             result = self.end_quick_fire_mode(time_up=time_up)
-            result['should_continue'] = "False"
+            result['should_continue'] = False
             return result
         
         return {

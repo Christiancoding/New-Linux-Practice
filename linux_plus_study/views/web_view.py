@@ -22,17 +22,16 @@ from utils.config import (
     QUICK_FIRE_QUESTIONS, QUICK_FIRE_TIME_LIMIT, MINI_QUIZ_QUESTIONS,
     POINTS_PER_CORRECT, POINTS_PER_INCORRECT, STREAK_BONUS_THRESHOLD, STREAK_BONUS_MULTIPLIER
 )
-from utils.database import DatabaseManager
 from werkzeug.utils import secure_filename
 import tempfile
 import mimetypes
+
 cli_playground = get_cli_playground()
 
 class LinuxPlusStudyWeb:
     """Web interface using Flask + pywebview for desktop app experience."""
     
     def __init__(self, game_state, debug=False):
-        self.db_manager = DatabaseManager(use_sqlite=True)
         self.game_state = game_state
         self.app = Flask(__name__, 
                         template_folder=os.path.join(os.path.dirname(__file__), '..', 'templates'),
@@ -60,15 +59,6 @@ class LinuxPlusStudyWeb:
         self.current_question_index = -1
         
         self.setup_routes()
-        try:
-            # Initialize database manager
-            self.db_manager = DatabaseManager(use_sqlite=True)
-            logging.info(f"Database initialized: {'SQLite' if self.db_manager.use_sqlite else 'JSON'}")
-        except Exception as e:
-            logging.error(f"Database initialization failed: {e}")
-            # Fallback to JSON mode
-            self.db_manager = DatabaseManager(use_sqlite=False)
-            logging.warning("Falling back to JSON storage mode")
     def _should_show_break_reminder(self):
         """Check if break reminder should be shown based on current settings."""
         disabled_modes = {'daily_challenge', 'pop_quiz', 'quick_fire', 'mini_quiz'}
@@ -295,38 +285,6 @@ class LinuxPlusStudyWeb:
                 return jsonify({
                     'success': False,
                     'error': f'Error loading history: {str(e)}'
-                })
-        @self.app.route('/api/database/status')
-        def database_status():
-            """Get database health and statistics."""
-            try:
-                integrity_report = self.db_manager.validate_data_integrity()
-                return jsonify({
-                    'success': True,
-                    'database_type': 'sqlite' if self.db_manager.use_sqlite else 'json',
-                    'integrity': integrity_report,
-                    'backup_available': True
-                })
-            except Exception as e:
-                return jsonify({
-                    'success': False,
-                    'error': str(e)
-                })
-
-        @self.app.route('/api/database/backup', methods=['POST'])
-        def create_database_backup():
-            """Create a database backup."""
-            try:
-                backup_path = self.db_manager.backup_database()
-                return jsonify({
-                    'success': True,
-                    'backup_path': backup_path,
-                    'message': 'Database backup created successfully'
-                })
-            except Exception as e:
-                return jsonify({
-                    'success': False,
-                    'error': str(e)
                 })
     def setup_export_import_routes(self):
         """Setup routes for export and import functionality."""
@@ -1083,6 +1041,9 @@ class LinuxPlusStudyWeb:
                 return f'{lines:8} {words:8} {chars:8} {filename}'
             else:
                 return f'wc: {filename}: No such file or directory'
+        
+        return None  # Command not simulated, try real execution
+
     def _get_help_text(self):
         """Get comprehensive help text"""
         return """Linux Plus CLI Playground - Available Commands:
@@ -1165,35 +1126,28 @@ class LinuxPlusStudyWeb:
             try:
                 # Use quiz controller as single source of truth
                 status = self.quiz_controller.get_session_status()
-                
-                # Get question count from database
-                questions = self.db_manager.load_questions()
-                categories = set(q.get('category', 'General') for q in questions)
-                
                 return jsonify({
                     'quiz_active': status['quiz_active'],
-                    'total_questions': len(questions),
-                    'categories': sorted(list(categories)),
+                    'total_questions': len(self.game_state.questions),
+                    'categories': sorted(list(self.game_state.categories)),
                     'session_score': status['session_score'],
                     'session_total': status['session_total'],
                     'current_streak': status['current_streak'],
                     'total_points': self.game_state.achievements.get('points_earned', 0),
                     'session_points': self.game_state.session_points,
-                    'quiz_mode': status['mode'],
-                    'database_status': 'sqlite' if self.db_manager.use_sqlite else 'json'
+                    'quiz_mode': status['mode']
                 })
             except Exception as e:
                 return jsonify({
                     'quiz_active': False,
-                    'total_questions': 0,
-                    'categories': [],
+                    'total_questions': len(self.game_state.questions),
+                    'categories': sorted(list(self.game_state.categories)),
                     'session_score': 0,
                     'session_total': 0,
                     'current_streak': 0,
                     'total_points': 0,
                     'session_points': 0,
                     'quiz_mode': None,
-                    'database_status': 'error',
                     'error': str(e)
                 })
         @self.app.route('/cli-playground')
@@ -1281,10 +1235,7 @@ class LinuxPlusStudyWeb:
                 self.current_question_index = result['original_index']
                 
                 # Format response for web interface
-                question_data = result['question_data']
-                q_text = question_data.get('question_text', question_data.get('question', ''))
-                options = question_data.get('options', [])
-                category = question_data.get('category', 'General')
+                q_text, options, _, category, _ = result['question_data']
                 
                 return jsonify({
                     'question': q_text,
@@ -1559,37 +1510,18 @@ class LinuxPlusStudyWeb:
                 return jsonify({'success': False, 'error': str(e)})
         @self.app.route('/api/question-count')
         def get_question_count():
+            """Get the current number of questions available."""
             try:
-                questions = self.db_manager.load_questions()
+                count = len(self.game_state.questions)
                 return jsonify({
                     'success': True,
-                    'count': len(questions),
-                    'database_type': 'sqlite' if self.db_manager.use_sqlite else 'json'
+                    'count': count
                 })
             except Exception as e:
                 return jsonify({
                     'success': False,
                     'error': str(e)
                 }), 500
-        @self.app.route('/api/database/migration-status')
-        def migration_status():
-            """Check if JSON to SQLite migration is available/needed."""
-            try:
-                json_files_exist = any(path.exists() for path in self.db_manager.json_paths.values())
-                sqlite_exists = self.db_manager.db_path.exists() if self.db_manager.use_sqlite else False
-                
-                return jsonify({
-                    'success': True,
-                    'json_files_exist': json_files_exist,
-                    'sqlite_exists': sqlite_exists,
-                    'migration_needed': json_files_exist and not sqlite_exists,
-                    'current_backend': 'sqlite' if self.db_manager.use_sqlite else 'json'
-                })
-            except Exception as e:
-                return jsonify({
-                    'success': False,
-                    'error': str(e)
-                })
         self.setup_export_import_routes()
     def handle_api_errors(f):
         def wrapper(*args, **kwargs):
@@ -1604,6 +1536,17 @@ class LinuxPlusStudyWeb:
                 }), 500
         wrapper.__name__ = f.__name__
         return wrapper
+    def _get_help_text(self):
+        """Get help text for CLI playground commands."""
+        help_func = cli_playground.safe_commands.get('help', lambda args: "No help available")
+        return help_func([])  # Pass empty args list
+
+    def _simulate_command(self, command):
+        """Simulate command execution using the CLI playground."""
+        try:
+            return cli_playground.process_command(command)
+        except Exception as e:
+            return f"Error executing command: {str(e)}"
     
     def run_flask_app(self):
         """Run the Flask app in a separate thread."""
@@ -1634,20 +1577,12 @@ class LinuxPlusStudyWeb:
         # Start the webview (this blocks until window is closed)
         webview.start(debug=self.debug)
     
-def quit_app(self):
-    """Clean shutdown of the application."""
-    try:
+    def quit_app(self):
+        """Clean shutdown of the application."""
         # Save any pending data
         self.game_state.save_history()
         self.game_state.save_achievements()
         
-        # Create final backup if using SQLite
-        if self.db_manager.use_sqlite:
-            self.db_manager.backup_database()
-            
-    except Exception as e:
-        logging.error(f"Error during app shutdown: {e}")
-    finally:
         # Close the webview window
         if self.window:
             self.window.destroy()
