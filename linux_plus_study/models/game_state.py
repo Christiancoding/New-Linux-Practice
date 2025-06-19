@@ -26,7 +26,7 @@ class GameState:
     It manages questions, achievements, history, and current session state.
     """
     
-    def __init__(self, history_file: str = HISTORY_FILE):
+    def __init__(self, history_file: str = str(HISTORY_FILE)):
         """
         Initialize the game state.
         
@@ -248,8 +248,7 @@ class GameState:
         if not self.quick_fire_active:
             return False
         
-        elapsed_time = time.time() - self.quick_fire_start_time
-        
+        elapsed_time = (time.time() - self.quick_fire_start_time) if self.quick_fire_start_time is not None else 0        
         # Check end conditions
         if elapsed_time > QUICK_FIRE_TIME_LIMIT:
             self.end_quick_fire_mode(time_up=True)
@@ -274,7 +273,10 @@ class GameState:
             return {'error': 'Quick Fire not active'}
         
         self.quick_fire_active = False
-        elapsed_time = time.time() - self.quick_fire_start_time
+        if self.quick_fire_start_time is not None:
+            elapsed_time = time.time() - self.quick_fire_start_time
+        else:
+            elapsed_time = 0.0
         
         # Award achievement if completed successfully
         achievement_earned = False
