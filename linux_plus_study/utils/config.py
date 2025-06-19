@@ -109,6 +109,7 @@ try:
     COLOR_WELCOME_TEXT = C["fg_white"]
     COLOR_WELCOME_TITLE = C["fg_bright_yellow"] + C["bold"]
     COLOR_RESET = C["reset"]
+    COLOR_SUCCESS = C["fg_bright_green"] + C["bold"]
     
 except ImportError:
     print("Warning: Colorama not found. Colored output will be disabled in CLI.")

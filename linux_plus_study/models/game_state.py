@@ -16,7 +16,17 @@ import random
 from collections import defaultdict, Counter
 
 from utils.database import DatabaseManager
-from utils.config import QUIZ_SETTINGS, ACHIEVEMENT_SETTINGS
+from utils.config import (
+    ACHIEVEMENTS_FILE, 
+    HISTORY_FILE, 
+    QUESTION_CATEGORIES,
+    POINTS_PER_CORRECT,
+    POINTS_PER_INCORRECT,
+    STREAK_BONUS_THRESHOLD,
+    STREAK_BONUS_MULTIPLIER,
+    QUIZ_SETTINGS,
+    ACHIEVEMENT_SETTINGS
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,64 +43,51 @@ class GameState:
     - Streak and achievement tracking
     """
     
-    def __init__(self, questions: Optional[List[Dict]] = None, use_database: bool = True):
-        """
-        Initialize game state.
+    def __init__(self, db_manager, achievements_file=ACHIEVEMENTS_FILE, history_file=HISTORY_FILE):
+        """Initialize GameState with database manager and load history."""
+        self.db_manager = db_manager
+        self.questions = self.db_manager.load_questions()
         
-        Args:
-            questions: List of question dictionaries (optional, loaded from DB if None)
-            use_database: Whether to use database backend (True) or memory only (False)
-        """
-        self.use_database = use_database
-        self.db_manager = DatabaseManager() if use_database else None
-        
-        # Session management
-        self.session_id = str(uuid.uuid4())
-        self.session_start_time = datetime.now()
-        self.session_points = 0
-        self.session_questions_answered = []
-        
-        # Load questions
-        if questions is None:
-            self.questions = self._load_questions()
-        else:
-            self.questions = questions
-        
-        # Question tracking
+        # Initialize other attributes
         self.asked_questions = set()
-        self.current_question = None
-        self.question_history = []
-        
-        # Performance tracking
+        self.current_session_history = []
+        self.session_points = 0
         self.current_streak = 0
-        self.best_streak = 0
-        self.total_correct = 0
-        self.total_answered = 0
+        self.quiz_active = False
         
-        # Category performance
-        self.category_stats = defaultdict(lambda: {'correct': 0, 'total': 0, 'streak': 0})
+        # Load persistent data
+        self.achievements_file = achievements_file
+        self.history_file = history_file
+        self.achievements = self.load_achievements()
+        self.history = self.load_history()
         
-        # Achievements and user data
-        self.achievements = self._load_achievements()
-        self.user_stats = self._load_user_stats()
-        
-        # Load existing history and calculate current stats
-        self._load_and_calculate_stats()
+        # Create categories set from loaded questions
+        self.categories = set(q.get('category', 'General') for q in self.questions)
         
         logger.info(f"GameState initialized with {len(self.questions)} questions")
+    def load_history(self):
+        """Load question history using database manager."""
+        try:
+            history = self.db_manager.load_history()
+            if history:
+                return history
+            else:
+                # Try loading from JSON as fallback
+                return self.db_manager.load_json_file(self.history_file)
+        except Exception as e:
+            logger.error(f"Failed to load history: {e}")
+            return {}
     
-    def _load_questions(self) -> List[Dict[str, Any]]:
-        """Load questions from database or return empty list."""
-        if self.db_manager:
-            return self.db_manager.load_questions()
-        else:
-            # Fallback to JSON if database not available
-            try:
-                from utils.database import load_json_file
-                return load_json_file('data/questions.json')
-            except Exception as e:
-                logger.error(f"Failed to load questions: {e}")
-                return []
+    def load_questions(self):
+        """Reload questions from database manager."""
+        try:
+            self.questions = self.db_manager.load_questions()
+            self.categories = set(q.get('category', 'General') for q in self.questions)
+            logger.info(f"Reloaded {len(self.questions)} questions")
+            return self.questions
+        except Exception as e:
+            logger.error(f"Failed to reload questions: {e}")
+            return self.questions  # Return existing questions if reload fails
     
     def _load_achievements(self) -> Dict[str, Any]:
         """Load user achievements."""
@@ -974,13 +971,18 @@ class GameState:
             logger.error(f"Error saving achievements to JSON: {e}")
     
     def save_history(self):
-        """Save current session history."""
-        # This is called at the end of sessions to ensure data persistence
-        # Most saving happens in real-time via update_history()
-        if self.use_database and self.db_manager:
-            self._save_session_summary_sqlite()
-        
-        logger.info(f"Session {self.session_id} saved with {len(self.session_questions_answered)} questions")
+        """Save question history using database manager."""
+        try:
+            self.db_manager.save_history(self.history)
+            logger.info("History saved successfully")
+        except Exception as e:
+            logger.error(f"Failed to save history: {e}")
+            # Fallback to JSON if database save fails
+            try:
+                self.db_manager.save_json_file(self.history_file, self.history)
+                logger.warning("History saved to JSON fallback")
+            except Exception as json_error:
+                logger.error(f"Failed to save history to JSON: {json_error}")
     
     def _save_session_summary_sqlite(self):
         """Save session summary to database."""

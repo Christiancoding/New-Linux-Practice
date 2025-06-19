@@ -24,9 +24,14 @@ from views.cli_view import LinuxPlusStudyCLI
 import views.cli_view as cli_view
 from views.web_view import LinuxPlusStudyWeb
 
-db_manager = DatabaseManager(use_sqlite=True)  # or False for JSON mode
-question_manager = QuestionManager(db_manager)
-questions = question_manager.load_questions()
+# Initialize database manager with proper error handling
+try:
+    db_manager = DatabaseManager(use_sqlite=True)
+    print(f"{COLOR_INFO}Database initialized: {'SQLite' if db_manager.use_sqlite else 'JSON'}{COLOR_RESET}")
+except Exception as e:
+    print(f"{COLOR_ERROR}Database initialization failed: {e}{COLOR_RESET}")
+    print(f"{COLOR_WARNING}Falling back to JSON mode...{COLOR_RESET}")
+    db_manager = DatabaseManager(use_sqlite=False)
 
 def detect_interface_preference():
     """
@@ -107,27 +112,23 @@ def get_user_interface_choice():
 
 def launch_cli_interface(game_state):
     """
-    Launch the CLI interface.
+    Launch the command-line interface.
     
     Args:
         game_state: GameState instance
     """
     try:
-        cli_view = LinuxPlusStudyCLI(game_state)
-        cli_view.display_welcome_message()
-        cli_view.main_menu()
+        cli_view = LinuxPlusStudyCLI(game_state, db_manager)
+        cli_view.main_loop()
     except KeyboardInterrupt:
-        print(f"\n{COLOR_WARNING} Keyboard interrupt detected. Saving progress and exiting. {COLOR_RESET}")
-        game_state.save_history()
-        game_state.save_achievements()
-        sys.exit(0)
+        print(f"\n{COLOR_WARNING}Goodbye!{COLOR_RESET}")
     except Exception as e:
-        print(f"\n{COLOR_ERROR} An unexpected error occurred in CLI mode: {e} {COLOR_RESET}")
-        print(f"{COLOR_INFO} Attempting to save progress before exiting... {COLOR_RESET}")
+        print(f"\nAn unexpected error occurred: {e}")
+        print("Error details:")
+        traceback.print_exc()
+        print("Attempting to save progress...")
         game_state.save_history()
         game_state.save_achievements()
-        traceback.print_exc()
-        sys.exit(1)
 def launch_web_interface(game_state):
     """
     Launch the web interface.
@@ -136,7 +137,7 @@ def launch_web_interface(game_state):
         game_state: GameState instance
     """
     try:
-        web_view = LinuxPlusStudyWeb(game_state)
+        web_view = LinuxPlusStudyWeb(game_state, db_manager)
         web_view.start()
         
     except ImportError as e:
@@ -157,10 +158,94 @@ def launch_web_interface(game_state):
         game_state.save_history()
         game_state.save_achievements()
         sys.exit(1)
+def handle_command_line_args():
+    """Handle command line arguments for database operations."""
+    if len(sys.argv) < 2:
+        return None
+    
+    command = sys.argv[1].lower()
+    
+    if command == '--backup':
+        print(f"{COLOR_INFO}Creating database backup...{COLOR_RESET}")
+        try:
+            backup_path = db_manager.backup_database()
+            print(f"{COLOR_SUCCESS}Backup created: {backup_path}{COLOR_RESET}")
+            sys.exit(0)
+        except Exception as e:
+            print(f"{COLOR_ERROR}Backup failed: {e}{COLOR_RESET}")
+            sys.exit(1)
+    
+    elif command == '--migrate':
+        print(f"{COLOR_INFO}Starting manual migration from JSON to SQLite...{COLOR_RESET}")
+        try:
+            # Force re-migration
+            db_manager_temp = DatabaseManager(use_sqlite=True)
+            db_manager_temp._migrate_from_json_if_needed()
+            print(f"{COLOR_SUCCESS}Migration completed successfully{COLOR_RESET}")
+            sys.exit(0)
+        except Exception as e:
+            print(f"{COLOR_ERROR}Migration failed: {e}{COLOR_RESET}")
+            sys.exit(1)
+    
+    elif command == '--check-db':
+        print(f"{COLOR_INFO}Checking database integrity...{COLOR_RESET}")
+        try:
+            report = db_manager.validate_data_integrity()
+            print(f"{COLOR_SUCCESS}Database Status:{COLOR_RESET}")
+            print(f"  - Valid: {report['valid']}")
+            print(f"  - Stats: {report['stats']}")
+            if report['errors']:
+                print(f"{COLOR_ERROR}  - Errors: {report['errors']}{COLOR_RESET}")
+            if report['warnings']:
+                print(f"{COLOR_WARNING}  - Warnings: {report['warnings']}{COLOR_RESET}")
+            sys.exit(0)
+        except Exception as e:
+            print(f"{COLOR_ERROR}Database check failed: {e}{COLOR_RESET}")
+            sys.exit(1)
+    
+    elif command == '--help':
+        print_help()
+        sys.exit(0)
+    
+    return command
 
+def print_help():
+    """Print command line help."""
+    print(f"{COLOR_INFO}Linux+ Study Game - Command Line Options:{COLOR_RESET}")
+    print(f"{COLOR_OPTIONS}  python main.py{COLOR_RESET}          - Start interactive mode")
+    print(f"{COLOR_OPTIONS}  python main.py cli{COLOR_RESET}      - Start CLI mode directly")
+    print(f"{COLOR_OPTIONS}  python main.py web{COLOR_RESET}      - Start web mode directly")
+    print(f"{COLOR_OPTIONS}  python main.py --backup{COLOR_RESET} - Create database backup")
+    print(f"{COLOR_OPTIONS}  python main.py --migrate{COLOR_RESET}- Migrate JSON to SQLite")
+    print(f"{COLOR_OPTIONS}  python main.py --check-db{COLOR_RESET}- Check database integrity")
+    print(f"{COLOR_OPTIONS}  python main.py --help{COLOR_RESET}   - Show this help")
+def setup_signal_handlers():
+    """Setup signal handlers for graceful shutdown."""
+    import signal
+    
+    def signal_handler(signum, frame):
+        print(f"\n{COLOR_WARNING}Received shutdown signal. Saving progress...{COLOR_RESET}")
+        try:
+            if 'db_manager' in globals():
+                db_manager.backup_database()
+                print(f"{COLOR_SUCCESS}Backup created before shutdown{COLOR_RESET}")
+        except Exception as e:
+            print(f"{COLOR_ERROR}Could not create backup: {e}{COLOR_RESET}")
+        finally:
+            print(f"{COLOR_INFO}Goodbye!{COLOR_RESET}")
+            sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 def main():
     """Main entry point for the Linux+ Study Game."""
-    
+        # Setup signal handlers for graceful shutdown
+    setup_signal_handlers()
+    # Handle command line arguments first
+    command = handle_command_line_args()
+    if command:
+        # Command was handled, exit gracefully
+        return
     # Initialize colorama if available
     try:
         if 'colorama' in sys.modules:
@@ -169,12 +254,21 @@ def main():
     except Exception as e:
         print(f"Warning: Failed to initialize colorama: {e}")
     
-    # Initialize game state
+    # Initialize game state with database manager
     try:
-        game_state = GameState()
+        game_state = GameState(db_manager)
+        print(f"{COLOR_SUCCESS}Game state initialized successfully{COLOR_RESET}")
     except Exception as e:
-        print(f"Fatal error: Failed to initialize game state: {e}")
+        print(f"{COLOR_ERROR}Fatal error: Failed to initialize game state: {e}{COLOR_RESET}")
         traceback.print_exc()
+        
+        # Try to create backup before exiting
+        try:
+            if 'db_manager' in locals():
+                backup_path = db_manager.backup_database()
+                print(f"{COLOR_INFO}Emergency backup created: {backup_path}{COLOR_RESET}")
+        except:
+            pass
         sys.exit(1)
     print(f"{COLOR_INFO}Welcome to the Linux+ Study Game!{COLOR_RESET}")
     # Determine interface preference
