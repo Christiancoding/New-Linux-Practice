@@ -1285,7 +1285,10 @@ class LinuxPlusStudyWeb:
                 self.current_question_index = result['original_index']
                 
                 # Format response for web interface
-                q_text, options, _, category, _ = result['question_data']
+                question_data = result['question_data']
+                q_text = question_data.get('question_text', question_data.get('question', ''))
+                options = question_data.get('options', [])
+                category = question_data.get('category', 'General')
                 
                 return jsonify({
                     'question': q_text,

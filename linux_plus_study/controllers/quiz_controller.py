@@ -139,7 +139,8 @@ class QuizController:
             return self.get_daily_challenge_question()
         
         # Regular question selection
-        question_data, original_index = self.game_state.select_question(category_filter)
+        question_data = self.game_state.select_question(category_filter)
+        original_index = -1  # Default value since we don't track original index in the new implementation
         
         if question_data is not None:
             result = {
@@ -238,7 +239,16 @@ class QuizController:
         if not self.quiz_active or len(question_data) < 5:
             return {'error': 'Invalid quiz state or question data'}
         
-        q_text, options, correct_answer_index, category, explanation = question_data
+        # Handle both dictionary and tuple formats for backward compatibility
+        if isinstance(question_data, dict):
+            q_text = question_data.get('question_text', question_data.get('question', ''))
+            options = question_data.get('options', [])
+            correct_answer_index = question_data.get('correct_answer_index', 0)
+            category = question_data.get('category', 'General')
+            explanation = question_data.get('explanation', '')
+        else:
+            # Legacy tuple format
+            q_text, options, correct_answer_index, category, explanation = question_data
         is_correct = (user_answer_index == correct_answer_index)
         
         # Update streak

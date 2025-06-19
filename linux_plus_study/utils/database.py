@@ -394,55 +394,102 @@ class DatabaseManager:
     
     def _migrate_history(self):
         """Migrate user history from JSON to SQLite."""
-        history_data = self.load_json_file(self.json_paths['history'])
-        
-        # Handle different history data formats
-        if not history_data:
-            logger.info("No history data to migrate")
-            return
-        
-        with self._get_db_connection() as conn:
-            # Check if history_data is a list or dict
-            if isinstance(history_data, list):
-                logger.warning("History data is in list format, attempting to migrate as individual entries")
-                for i, entry in enumerate(history_data):
-                    if isinstance(entry, dict):
-                        question_text = entry.get('question', f"Question {i+1}")
-                        timestamp = entry.get('timestamp', datetime.now().isoformat())
-                        is_correct = entry.get('correct', False)
-                        
-                        conn.execute('''
-                            INSERT INTO user_history 
-                            (question_text, is_correct, timestamp, correct_answer, user_answer)
-                            VALUES (?, ?, ?, ?, ?)
-                        ''', (question_text, is_correct, timestamp, 0, 0))
+        try:
+            history_data = self.load_json_file(self.json_paths['history'])
             
-            elif isinstance(history_data, dict):
-                # Expected format: {question_text: {correct: int, attempts: int, history: [...]}}
-                for question_text, data in history_data.items():
-                    if isinstance(data, dict):
-                        history_entries = data.get('history', [])
-                        
-                        for entry in history_entries:
-                            if isinstance(entry, dict):
-                                timestamp = entry.get('timestamp', datetime.now().isoformat())
-                                is_correct = entry.get('correct', False)
-                                
-                                conn.execute('''
-                                    INSERT INTO user_history 
-                                    (question_text, is_correct, timestamp, correct_answer, user_answer)
-                                    VALUES (?, ?, ?, ?, ?)
-                                ''', (question_text, is_correct, timestamp, 0, 0))
-                    else:
-                        logger.warning(f"Unexpected data format for question: {question_text}")
-            
-            else:
-                logger.error(f"Unexpected history data type: {type(history_data)}")
+            # Handle different history data formats
+            if not history_data:
+                logger.info("No history data to migrate")
                 return
             
-            conn.commit()
-        
-        logger.info("Migrated user history")
+            with self._get_db_connection() as conn:
+                # Check if history_data follows the new structure with metadata
+                if isinstance(history_data, dict) and 'questions' in history_data:
+                    # New structure: {questions: {question_text: data}, sessions: [], total_correct: 0, ...}
+                    questions_data = history_data.get('questions', {})
+                    
+                    for question_text, data in questions_data.items():
+                        if isinstance(data, dict):
+                            history_entries = data.get('history', [])
+                            
+                            for entry in history_entries:
+                                if isinstance(entry, dict):
+                                    timestamp = entry.get('timestamp', datetime.now().isoformat())
+                                    is_correct = entry.get('correct', False)
+                                    
+                                    conn.execute('''
+                                        INSERT INTO user_history 
+                                        (question_text, is_correct, timestamp, correct_answer, user_answer)
+                                        VALUES (?, ?, ?, ?, ?)
+                                    ''', (question_text, is_correct, timestamp, 0, 0))
+                    
+                    # Migrate aggregate stats if available
+                    total_correct = history_data.get('total_correct', 0)
+                    total_attempts = history_data.get('total_attempts', 0)
+                    
+                    if total_correct > 0:
+                        conn.execute('''
+                            INSERT OR REPLACE INTO user_stats (stat_name, stat_value)
+                            VALUES (?, ?)
+                        ''', ('total_correct', str(total_correct)))
+                    
+                    if total_attempts > 0:
+                        conn.execute('''
+                            INSERT OR REPLACE INTO user_stats (stat_name, stat_value)
+                            VALUES (?, ?)
+                        ''', ('total_attempts', str(total_attempts)))
+                
+                elif isinstance(history_data, dict):
+                    # Legacy structure: {question_text: {correct: int, attempts: int, history: []}}
+                    # Only process keys that look like question text (not metadata keys)
+                    metadata_keys = {'sessions', 'total_correct', 'total_attempts', 'incorrect_review', 'leaderboard', 'categories'}
+                    
+                    for question_text, data in history_data.items():
+                        # Skip metadata keys
+                        if question_text in metadata_keys:
+                            continue
+                        
+                        if isinstance(data, dict):
+                            history_entries = data.get('history', [])
+                            
+                            for entry in history_entries:
+                                if isinstance(entry, dict):
+                                    timestamp = entry.get('timestamp', datetime.now().isoformat())
+                                    is_correct = entry.get('correct', False)
+                                    
+                                    conn.execute('''
+                                        INSERT INTO user_history 
+                                        (question_text, is_correct, timestamp, correct_answer, user_answer)
+                                        VALUES (?, ?, ?, ?, ?)
+                                    ''', (question_text, is_correct, timestamp, 0, 0))
+                        else:
+                            # Only warn for non-metadata keys
+                            if question_text not in metadata_keys:
+                                logger.warning(f"Unexpected data format for question: {question_text}")
+                
+                elif isinstance(history_data, list):
+                    logger.warning("History data is in list format, attempting to migrate as individual entries")
+                    for i, entry in enumerate(history_data):
+                        if isinstance(entry, dict):
+                            question_text = entry.get('question', f"Question {i+1}")
+                            timestamp = entry.get('timestamp', datetime.now().isoformat())
+                            is_correct = entry.get('correct', False)
+                            
+                            conn.execute('''
+                                INSERT INTO user_history 
+                                (question_text, is_correct, timestamp, correct_answer, user_answer)
+                                VALUES (?, ?, ?, ?, ?)
+                            ''', (question_text, is_correct, timestamp, 0, 0))
+                
+                else:
+                    logger.error(f"Unexpected history data type: {type(history_data)}")
+                    return
+                
+                conn.commit()
+            
+            logger.info("Migrated user history")
+        except Exception as e:
+            logger.error(f"Error migrating history: {e}")
     
     def _migrate_achievements(self):
         """Migrate achievements from JSON to SQLite."""
