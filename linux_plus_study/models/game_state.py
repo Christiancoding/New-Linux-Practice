@@ -58,8 +58,8 @@ class GameState:
         # Load persistent data
         self.achievements_file = achievements_file
         self.history_file = history_file
-        self.achievements = self.load_achievements()
-        self.history = self.load_history()
+        self.achievements = self._load_achievements()
+        self.history = self._load_history()
         
         # Create categories set from loaded questions
         self.categories = set(q.get('category', 'General') for q in self.questions)
