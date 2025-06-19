@@ -139,7 +139,7 @@ class LinuxPlusStudyWeb:
                     return jsonify({'success': True, 'output': help_text})
                 
                 # Handle simulated file system commands
-                output = self._simulate_command(command)
+                output = self._simulate_sample_command(command)
                 if output is not None:
                     return jsonify({'success': True, 'output': output})
                 
@@ -449,7 +449,7 @@ class LinuxPlusStudyWeb:
                 if file.filename == '':
                     return jsonify({'success': False, 'message': 'No file was selected.'}), 400
                 
-                filename = secure_filename(file.filename)
+                filename = secure_filename(file.filename or "")
                 file_ext = filename.lower().split('.')[-1] if '.' in filename else ''
                 
                 if file_ext not in ['json', 'md']:
@@ -987,7 +987,7 @@ class LinuxPlusStudyWeb:
         except Exception as e:
             print(f"Error adding question to pool: {str(e)}")
             return False
-    def _simulate_command(self, command):
+    def _simulate_sample_command(self, command):
         """Simulate common commands with educational examples"""
         
         # Create sample files content
@@ -1044,7 +1044,7 @@ class LinuxPlusStudyWeb:
         
         return None  # Command not simulated, try real execution
 
-    def _get_help_text(self):
+    def _get_builtin_help_text(self):
         """Get comprehensive help text"""
         return """Linux Plus CLI Playground - Available Commands:
 
@@ -1523,18 +1523,20 @@ class LinuxPlusStudyWeb:
                     'error': str(e)
                 }), 500
         self.setup_export_import_routes()
+    @staticmethod
     def handle_api_errors(f):
         def wrapper(*args, **kwargs):
             try:
                 return f(*args, **kwargs)
             except Exception as e:
-                logging.error(f"API Error in {f.__name__}: {str(e)}")
+                func_name = getattr(f, "__name__", str(f))
+                logging.error(f"API Error in {func_name}: {str(e)}")
                 logging.error(traceback.format_exc())
                 return jsonify({
                     'error': f'Server error: {str(e)}',
                     'success': False
                 }), 500
-        wrapper.__name__ = f.__name__
+        wrapper.__name__ = getattr(f, "__name__", str(f))
         return wrapper
     def _get_help_text(self):
         """Get help text for CLI playground commands."""

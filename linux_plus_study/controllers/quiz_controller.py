@@ -390,7 +390,10 @@ class QuizController:
         if not self.quick_fire_active:
             return {'active': False}
         
-        elapsed_time = time.time() - self.quick_fire_start_time
+        if self.quick_fire_start_time is not None:
+            elapsed_time = time.time() - self.quick_fire_start_time
+        else:
+            elapsed_time = 0
         time_remaining = max(0, QUICK_FIRE_TIME_LIMIT - elapsed_time)
         questions_remaining = max(0, QUICK_FIRE_QUESTIONS - self.quick_fire_questions_answered)
         
@@ -400,7 +403,7 @@ class QuizController:
         
         if time_up or questions_complete:
             result = self.end_quick_fire_mode(time_up=time_up)
-            result['should_continue'] = False
+            result['should_continue'] = "False"
             return result
         
         return {
@@ -578,7 +581,10 @@ class QuizController:
         if not self.quick_fire_active:
             return None
         
-        elapsed = time.time() - self.quick_fire_start_time
+        if self.quick_fire_start_time is not None:
+            elapsed = time.time() - self.quick_fire_start_time
+        else:
+            elapsed = 0
         time_remaining = max(0, QUICK_FIRE_TIME_LIMIT - elapsed)
         questions_remaining = max(0, QUICK_FIRE_QUESTIONS - self.quick_fire_questions_answered)
         
