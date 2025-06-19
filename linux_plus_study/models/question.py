@@ -288,7 +288,7 @@ class QuestionManager:
             for item in data:
                 try:
                     if isinstance(item, (list, tuple)):
-                        question = Question.from_tuple(item)
+                        question = Question.from_tuple(tuple(item))
                     elif isinstance(item, dict):
                         question = Question.from_dict(item)
                     else:
