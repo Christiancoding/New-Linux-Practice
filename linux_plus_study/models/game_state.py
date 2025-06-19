@@ -46,6 +46,7 @@ class GameState:
     def __init__(self, db_manager, achievements_file=ACHIEVEMENTS_FILE, history_file=HISTORY_FILE):
         """Initialize GameState with database manager and load history."""
         self.db_manager = db_manager
+        self.use_database = True  # or False if you want to use JSON files instead
         self.questions = self.db_manager.load_questions()
         
         # Initialize other attributes
