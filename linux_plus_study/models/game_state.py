@@ -43,108 +43,117 @@ class GameState:
     - Streak and achievement tracking
     """
     
-def __init__(self, db_manager, achievements_file=ACHIEVEMENTS_FILE, history_file=HISTORY_FILE):
-    """Initialize GameState with database manager and load history."""
-    self.db_manager = db_manager
-    self.use_database = True  # or False if you want to use JSON files instead
-    
-    # Load questions first
-    try:
-        self.questions = self.db_manager.load_questions()
-    except Exception as e:
-        logger.error(f"Failed to load questions: {e}")
-        self.questions = []
-    
-    # Initialize session tracking attributes
-    self.asked_questions = set()
-    self.current_session_history = []
-    self.session_points = 0
-    self.current_streak = 0
-    self.quiz_active = False
-    
-    # Missing CLI-expected attributes
-    self.score = 0  # Current session score
-    self.total_questions_session = 0  # Questions answered this session
-    self.leaderboard = []  # Personal leaderboard
-    self.verify_session_answers = []  # For verify mode
-    self.study_history = {}  # Historical statistics
-    
-    # Achievement tracking
-    self.total_correct = 0  # Total correct answers ever
-    self.total_answered = 0  # Total questions answered ever
-    self.best_streak = 0  # Best streak ever achieved
-    self.category_stats = defaultdict(lambda: {'correct': 0, 'total': 0})
-    
-    # Session management attributes
-    self.session_questions_answered = []
-    self.answered_indices_session = []
-    
-    # Daily challenge attributes
-    self.daily_challenge_completed = False
-    self.last_daily_challenge_date = None
-    
-    # Quick fire mode attributes
-    self.quick_fire_active = False
-    self.quick_fire_start_time = None
-    self.quick_fire_questions_answered = 0
-    
-    # Import constants from config with fallbacks
-    try:
-        from utils.config import (
-            POINTS_PER_CORRECT, POINTS_PER_INCORRECT,
-            STREAK_BONUS_THRESHOLD, STREAK_BONUS_MULTIPLIER
-        )
-        self.POINTS_PER_CORRECT = POINTS_PER_CORRECT
-        self.POINTS_PER_INCORRECT = POINTS_PER_INCORRECT
-        self.STREAK_BONUS_THRESHOLD = STREAK_BONUS_THRESHOLD
-        self.STREAK_BONUS_MULTIPLIER = STREAK_BONUS_MULTIPLIER
-    except ImportError:
-        # Fallback values if config import fails
-        self.POINTS_PER_CORRECT = 10
-        self.POINTS_PER_INCORRECT = -2
-        self.STREAK_BONUS_THRESHOLD = 5
-        self.STREAK_BONUS_MULTIPLIER = 1.5
-    
-    # Load persistent data
-    self.achievements_file = achievements_file
-    self.history_file = history_file
-    
-    # Load data with error handling
-    try:
-        self.achievements = self._load_achievements()
-    except Exception as e:
-        logger.error(f"Failed to load achievements: {e}")
-        self.achievements = {'badges': [], 'points_earned': 0, 'questions_answered': 0}
-    
-    try:
-        self.history = self.load_history()
-    except Exception as e:
-        logger.error(f"Failed to load history: {e}")
-        self.history = {}
-    
-    # Load additional data structures
-    self._load_study_history()
-    self._load_leaderboard()
-    
-    # Create categories set from loaded questions
-    if self.questions:
-        self.categories = set(q.get('category', 'General') for q in self.questions)
-    else:
-        self.categories = set()
-    
-    logger.info(f"GameState initialized with {len(self.questions)} questions")
-    def load_history(self):
-        """Load question history using database manager."""
+    def __init__(self, db_manager, achievements_file=ACHIEVEMENTS_FILE, history_file=HISTORY_FILE):
+        """Initialize GameState with database manager and load history."""
+        self.db_manager = db_manager
+        self.use_database = True  # or False if you want to use JSON files instead
+        
+        # Load questions first
         try:
-            history = self.db_manager.load_history()
-            if history:
-                return history
-            else:
-                # Try loading from JSON as fallback
-                return self.db_manager.load_json_file(self.history_file)
+            self.questions = self.db_manager.load_questions()
+        except Exception as e:
+            logger.error(f"Failed to load questions: {e}")
+            self.questions = []
+        
+        # Initialize session tracking attributes
+        self.asked_questions = set()
+        self.current_session_history = []
+        self.session_points = 0
+        self.current_streak = 0
+        self.quiz_active = False
+        
+        # Missing CLI-expected attributes
+        self.score = 0  # Current session score
+        self.total_questions_session = 0  # Questions answered this session
+        self.leaderboard = []  # Personal leaderboard
+        self.verify_session_answers = []  # For verify mode
+        self.study_history = {}  # Historical statistics
+        
+        # Achievement tracking
+        self.total_correct = 0  # Total correct answers ever
+        self.total_answered = 0  # Total questions answered ever
+        self.best_streak = 0  # Best streak ever achieved
+        self.category_stats = defaultdict(lambda: {'correct': 0, 'total': 0})
+        
+        # Session management attributes
+        self.session_questions_answered = []
+        self.answered_indices_session = []
+        
+        # Daily challenge attributes
+        self.daily_challenge_completed = False
+        self.last_daily_challenge_date = None
+        
+        # Quick fire mode attributes
+        self.quick_fire_active = False
+        self.quick_fire_start_time = None
+        self.quick_fire_questions_answered = 0
+        
+        # Import constants from config with fallbacks
+        try:
+            from utils.config import (
+                POINTS_PER_CORRECT, POINTS_PER_INCORRECT,
+                STREAK_BONUS_THRESHOLD, STREAK_BONUS_MULTIPLIER
+            )
+            self.POINTS_PER_CORRECT = POINTS_PER_CORRECT
+            self.POINTS_PER_INCORRECT = POINTS_PER_INCORRECT
+            self.STREAK_BONUS_THRESHOLD = STREAK_BONUS_THRESHOLD
+            self.STREAK_BONUS_MULTIPLIER = STREAK_BONUS_MULTIPLIER
+        except ImportError:
+            # Fallback values if config import fails
+            self.POINTS_PER_CORRECT = 10
+            self.POINTS_PER_INCORRECT = -2
+            self.STREAK_BONUS_THRESHOLD = 5
+            self.STREAK_BONUS_MULTIPLIER = 1.5
+        
+        # Load persistent data
+        self.achievements_file = achievements_file
+        self.history_file = history_file
+        
+        # Load data with error handling
+        try:
+            self.achievements = self._load_achievements()
+        except Exception as e:
+            logger.error(f"Failed to load achievements: {e}")
+            self.achievements = {'badges': [], 'points_earned': 0, 'questions_answered': 0}
+        
+        try:
+            self.history = self.load_history()
         except Exception as e:
             logger.error(f"Failed to load history: {e}")
-            return {}
+            self.history = {}
+        
+            # Load additional data structures
+                self._load_study_history()
+                self._load_leaderboard()
+    
+            # Create categories set from loaded questions
+            if self.questions:
+                self.categories = set(q.get('category', 'General') for q in self.questions)
+            else:
+                self.categories = set()
+            
+            logger.info(f"GameState initialized with {len(self.questions)} questions")
+    
+        def load_history(self):
+            """Load question history using database manager."""
+            try:
+                history = self.db_manager.load_history()
+                if history:
+                    return history
+                else:
+                    # Try loading from JSON as fallback
+                    return self.db_manager.load_json_file(self.history_file)
+            except Exception as e:
+                logger.error(f"Failed to load history: {e}")
+                return {}
+    
+        def _load_study_history(self):
+            """Stub for loading study history (extend as needed)."""
+            self.study_history = {}
+    
+        def _load_leaderboard(self):
+            """Stub for loading leaderboard (extend as needed)."""
+            self.leaderboard = []
     
     def load_questions(self):
         """Reload questions from database manager."""
@@ -618,12 +627,6 @@ def __init__(self, db_manager, achievements_file=ACHIEVEMENTS_FILE, history_file
             'new_achievements': new_achievements,
             'accuracy': (self.total_correct / self.total_answered * 100) if self.total_answered > 0 else 0
         }
-    def _check_achievements(self) -> List[str]:        """
-        Check for new achievements based on current session and total progress.
-        
-        Returns:
-            List of newly earned achievement names
-        """
     def update_points(self, points: int):
         """
         Update points for the current session and total achievements.
@@ -650,15 +653,12 @@ def __init__(self, db_manager, achievements_file=ACHIEVEMENTS_FILE, history_file
         
         logger.debug(f"Updated points: +{points}, Session total: {self.session_points}, Overall total: {self.achievements['points_earned']}")
 
-    def save_achievements(self):
-        """Save achievements using the appropriate backend."""
+    def _save_achievements_sqlite(self, new_achievements: List[str] = None):
+        """Save achievements to SQLite database."""
         if self.use_database and self.db_manager:
             self._save_achievements_sqlite()
         else:
             self._save_achievements_json()
-
-    def _save_achievements_sqlite(self, new_achievements: List[str] = None):
-        """Save achievements to SQLite database."""
         try:
             with self.db_manager._get_db_connection() as conn:
                 # Update total points

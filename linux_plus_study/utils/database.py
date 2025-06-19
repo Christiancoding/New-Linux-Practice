@@ -331,67 +331,6 @@ class DatabaseManager:
             
             conn.commit()
     
-    def _validate_json_data(self) -> Dict[str, Any]:
-        """
-        Validate JSON data before migration.
-        
-        Returns:
-            Dictionary with validation results for each file
-        """
-        validation_results = {}
-        
-        for file_type, file_path in self.json_paths.items():
-            if not file_path.exists():
-                validation_results[file_type] = {'exists': False, 'valid': True, 'message': 'File does not exist'}
-                continue
-            
-            try:
-                data = self.load_json_file(file_path)
-                result = {'exists': True, 'valid': True, 'message': 'OK', 'data_type': type(data).__name__}
-                
-                if file_type == 'questions':
-                    if isinstance(data, list):
-                        result['count'] = len(data)
-                        # Check first few questions for structure
-                        if data and len(data) > 0:
-                            first_question = data[0]
-                            has_question_text = 'question_text' in first_question or 'question' in first_question
-                            has_options = 'options' in first_question
-                            has_answer = 'correct_answer_index' in first_question or 'correct_answer' in first_question
-                            
-                            if not (has_question_text and has_options and has_answer):
-                                result['valid'] = False
-                                result['message'] = 'Question structure appears invalid'
-                    else:
-                        result['valid'] = False
-                        result['message'] = 'Questions should be a list'
-                
-                elif file_type == 'history':
-                    if isinstance(data, dict):
-                        result['count'] = len(data)
-                        result['message'] = f'Dictionary with {len(data)} question entries'
-                    elif isinstance(data, list):
-                        result['count'] = len(data)
-                        result['message'] = f'List with {len(data)} entries (unexpected format)'
-                        result['valid'] = False
-                    else:
-                        result['valid'] = False
-                        result['message'] = f'Unexpected data type: {type(data)}'
-                
-                validation_results[file_type] = result
-                
-            except Exception as e:
-                validation_results[file_type] = {
-                    'exists': True, 
-                    'valid': False, 
-                    'message': f'Error reading file: {e}',
-                    'data_type': 'unknown'
-                }
-        
-        return validation_results
-        
-        logger.info(f"Migrated {len(questions_data)} questions")
-    
     def _migrate_history(self):
         """Migrate user history from JSON to SQLite."""
         try:

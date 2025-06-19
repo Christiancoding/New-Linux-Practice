@@ -26,7 +26,6 @@ from utils.database import DatabaseManager
 from werkzeug.utils import secure_filename
 import tempfile
 import mimetypes
-
 cli_playground = get_cli_playground()
 
 class LinuxPlusStudyWeb:
@@ -1084,9 +1083,6 @@ class LinuxPlusStudyWeb:
                 return f'{lines:8} {words:8} {chars:8} {filename}'
             else:
                 return f'wc: {filename}: No such file or directory'
-        
-        return None  # Command not simulated, try real execution
-
     def _get_help_text(self):
         """Get comprehensive help text"""
         return """Linux Plus CLI Playground - Available Commands:
@@ -1608,17 +1604,6 @@ class LinuxPlusStudyWeb:
                 }), 500
         wrapper.__name__ = f.__name__
         return wrapper
-    def _get_help_text(self):
-        """Get help text for CLI playground commands."""
-        help_func = cli_playground.safe_commands.get('help', lambda args: "No help available")
-        return help_func([])  # Pass empty args list
-
-    def _simulate_command(self, command):
-        """Simulate command execution using the CLI playground."""
-        try:
-            return cli_playground.process_command(command)
-        except Exception as e:
-            return f"Error executing command: {str(e)}"
     
     def run_flask_app(self):
         """Run the Flask app in a separate thread."""
