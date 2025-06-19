@@ -12,14 +12,21 @@ import traceback
 if sys.version_info < (3, 0):
     print("This script requires Python 3. Please run with python3.")
     sys.exit(1)
+
 import os
 
 # Import configuration and utilities
+from models.question import QuestionManager
+from utils.database import DatabaseManager
 from utils.config import *
 from models.game_state import GameState
 from views.cli_view import LinuxPlusStudyCLI
 import views.cli_view as cli_view
 from views.web_view import LinuxPlusStudyWeb
+
+db_manager = DatabaseManager(use_sqlite=True)  # or False for JSON mode
+question_manager = QuestionManager(db_manager)
+questions = question_manager.load_questions()
 
 def detect_interface_preference():
     """

@@ -11,6 +11,7 @@ import random
 import hashlib
 from datetime import datetime
 from utils.config import *
+from models.question import QuestionManager, Question
 
 
 class QuizController:
