@@ -8,6 +8,8 @@ featuring both CLI and web interfaces with gamification elements.
 
 import sys
 import traceback
+import signal
+import sys
 # Ensure the script is run with Python 3
 if sys.version_info < (3, 0):
     print("This script requires Python 3. Please run with python3.")
@@ -121,6 +123,14 @@ def launch_cli_interface(game_state):
         game_state.save_achievements()
         traceback.print_exc()
         sys.exit(1)
+def signal_handler(sig, frame):
+    """Handle Ctrl+C gracefully"""
+    print("\n\n🙏 Thanks for using Linux+ Study App!")
+    print("📚 Keep practicing and good luck with your certification!")
+    print("👋 Goodbye!\n")
+    sys.exit(0)
+signal.signal(signal.SIGINT, signal_handler)
+
 def launch_web_interface(game_state):
     """
     Launch the web interface.
@@ -129,8 +139,19 @@ def launch_web_interface(game_state):
         game_state: GameState instance
     """
     try:
+        # Register signal handler for graceful exit
+        signal.signal(signal.SIGINT, signal_handler)
         web_view = LinuxPlusStudyWeb(game_state)
+        print("🚀 Starting Linux+ Study App...")
+        print("📖 Web interface loading...")
+        print("💡 Press Ctrl+C to exit gracefully")
         web_view.start()
+    except KeyboardInterrupt:
+        signal_handler(None, None)
+    except Exception as e:
+        print(f"\n❌ Error starting web interface: {e}")
+        print("🔧 Please check your installation and try again.")
+        sys.exit(1)
         
     except ImportError as e:
         print(f"Error: Failed to initialize web interface.")
@@ -150,7 +171,6 @@ def launch_web_interface(game_state):
         game_state.save_history()
         game_state.save_achievements()
         sys.exit(1)
-
 def main():
     """Main entry point for the Linux+ Study Game."""
     

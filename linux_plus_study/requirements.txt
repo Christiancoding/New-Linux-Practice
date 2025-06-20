@@ -60,6 +60,7 @@ asyncio==3.4.3
 
 # Development server enhancements
 gunicorn==21.2.0
+waitress==2.1.2
 
 # CORS support for web API
 flask-cors==4.0.0
