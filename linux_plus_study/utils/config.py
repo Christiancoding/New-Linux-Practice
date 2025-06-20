@@ -1,50 +1,69 @@
 #!/usr/bin/env python3
 """
-Configuration constants for the Linux+ Study Game.
+Configuration settings for Linux+ Study Application
+
+This module contains all configuration constants, database settings,
+and application parameters used throughout the application.
 """
 
 import sys
 import os
 from pathlib import Path
 
-# --- File Constants ---
-HISTORY_FILE = "linux_plus_history.json"
-ACHIEVEMENTS_FILE = "linux_plus_achievements.json"
+# =============================================================================
+# BASE PATHS
+# =============================================================================
 
-# --- Quiz Mode Constants ---
-QUIZ_MODE_STANDARD = "standard"
-QUIZ_MODE_VERIFY = "verify"
-
-# --- Gamification Constants ---
-POINTS_PER_CORRECT = 10
-POINTS_PER_INCORRECT = -2
-STREAK_BONUS_THRESHOLD = 3
-STREAK_BONUS_MULTIPLIER = 1.5
-
-# --- Quick Fire Mode Constants ---
-QUICK_FIRE_QUESTIONS = 5
-QUICK_FIRE_TIME_LIMIT = 180  # 3 minutes in seconds
-
-# --- Mini Quiz Constants ---
-MINI_QUIZ_QUESTIONS = 3
-MINI_QUIZ_TIME_LIMIT = 30  # 30 seconds
-# Project structure paths
+# Get the project root directory
 PROJECT_ROOT = Path(__file__).parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
-TEMPLATES_DIR = PROJECT_ROOT / "templates"
 STATIC_DIR = PROJECT_ROOT / "static"
+TEMPLATES_DIR = PROJECT_ROOT / "templates"
 UTILS_DIR = PROJECT_ROOT / "utils"
 
-# Data file paths
+# =============================================================================
+# FILE PATHS (Current JSON-based system)
+# =============================================================================
+
+# Data files (backward compatibility with existing system)
 QUESTIONS_FILE = DATA_DIR / "questions.json"
 ACHIEVEMENTS_FILE = PROJECT_ROOT / "linux_plus_achievements.json"
 HISTORY_FILE = PROJECT_ROOT / "linux_plus_history.json"
 WEB_SETTINGS_FILE = PROJECT_ROOT / "web_settings.json"
 
+# Legacy file constants (for compatibility)
+HISTORY_FILE_LEGACY = "linux_plus_history.json"
+ACHIEVEMENTS_FILE_LEGACY = "linux_plus_achievements.json"
+
+# =============================================================================
+# APPLICATION MODES AND CONSTANTS
+# =============================================================================
+
 # Application modes (GUI mode removed)
 SUPPORTED_MODES = ["cli", "web"]
 DEFAULT_MODE = "cli"
 
+# Quiz Mode Constants
+QUIZ_MODE_STANDARD = "standard"
+QUIZ_MODE_VERIFY = "verify"
+
+# Gamification Constants
+POINTS_PER_CORRECT = 10
+POINTS_PER_INCORRECT = -2
+STREAK_BONUS_THRESHOLD = 3
+STREAK_BONUS_MULTIPLIER = 1.5
+
+# Quick Fire Mode Constants
+QUICK_FIRE_QUESTIONS = 5
+QUICK_FIRE_TIME_LIMIT = 180  # 3 minutes in seconds
+
+# Mini Quiz Constants
+MINI_QUIZ_QUESTIONS = 3
+MINI_QUIZ_TIME_LIMIT = 30  # 30 seconds
+
+# =============================================================================
+# CLI COLOR CONFIGURATION (COLORAMA)
+# =============================================================================
 
 # --- Colorama Setup (CLI Colors) ---
 try:
@@ -127,6 +146,10 @@ except ImportError:
     COLOR_WELCOME_BORDER, COLOR_WELCOME_TEXT, COLOR_WELCOME_TITLE = "", "", ""
     COLOR_RESET = ""
 
+# =============================================================================
+# SAMPLE QUESTIONS DATA
+# =============================================================================
+
 # --- Sample Questions Data ---
 SAMPLE_QUESTIONS = [
     (
@@ -136,6 +159,46 @@ SAMPLE_QUESTIONS = [
         "`grub2-install` installs the GRUB2 bootloader files to the appropriate location and typically installs the boot code to the MBR or EFI partition. Example: `grub2-install /dev/sda` (for BIOS systems) or `grub2-install --target=x86_64-efi --efi-directory=/boot/efi` (for UEFI systems)."
     )
 ]
+
+# =============================================================================
+# DATABASE CONFIGURATION
+# =============================================================================
+
+# Database URLs
+SQLITE_URL = f"sqlite:///{PROJECT_ROOT}/linux_plus_study.db"
+POSTGRESQL_URL = os.getenv(
+    "DATABASE_URL", 
+    "postgresql://username:password@localhost:5432/linux_plus_study"
+)
+
+# Database settings
+DATABASE_CONFIG = {
+    "SQLALCHEMY_DATABASE_URI": SQLITE_URL,  # Default to SQLite
+    "SQLALCHEMY_TRACK_MODIFICATIONS": False,
+    "SQLALCHEMY_ENGINE_OPTIONS": {
+        "pool_pre_ping": True,
+        "pool_recycle": 300,
+        "connect_args": {"check_same_thread": False} if "sqlite" in SQLITE_URL else {}
+    }
+}
+
+# Connection pool settings
+CONNECTION_POOL_CONFIG = {
+    "pool_size": 10,
+    "max_overflow": 20,
+    "pool_timeout": 30,
+    "pool_recycle": 3600
+}
+
+# =============================================================================
+# APPLICATION SETTINGS
+# =============================================================================
+
+# Application metadata
+APP_NAME = "Linux+ Study Assistant"
+APP_VERSION = "2.0.0"
+APP_DESCRIPTION = "Comprehensive Linux+ certification study tool"
+
 # CLI Configuration Settings
 CLI_SETTINGS = {
     "welcome_message": "Welcome to Linux Plus Study Tool",
@@ -147,7 +210,7 @@ CLI_SETTINGS = {
     "input_timeout": 300,  # 5 minutes
 }
 
-# Web Configuration Settings
+# Web Configuration Settings (Enhanced)
 WEB_SETTINGS = {
     "default_host": "127.0.0.1",
     "default_port": 5000,
@@ -158,7 +221,7 @@ WEB_SETTINGS = {
     "max_content_length": 16 * 1024 * 1024,  # 16MB
 }
 
-# Quiz Configuration
+# Quiz Configuration (Enhanced)
 QUIZ_SETTINGS = {
     "default_question_count": 10,
     "max_question_count": 50,
@@ -169,13 +232,40 @@ QUIZ_SETTINGS = {
     "allow_review": True,
 }
 
-# Achievement System Configuration
+# Default quiz settings (for backward compatibility)
+DEFAULT_QUIZ_CONFIG = {
+    "questions_per_quiz": QUIZ_SETTINGS["default_question_count"],
+    "time_limit_minutes": None,  # No time limit by default
+    "shuffle_questions": QUIZ_SETTINGS["shuffle_questions"],
+    "shuffle_options": QUIZ_SETTINGS["shuffle_options"],
+    "show_immediate_feedback": QUIZ_SETTINGS["show_immediate_feedback"],
+    "allow_review": QUIZ_SETTINGS["allow_review"]
+}
+
+# Quick fire mode settings (Enhanced)
+QUICK_FIRE_CONFIG = {
+    "default_duration_seconds": QUICK_FIRE_TIME_LIMIT,
+    "questions_per_minute": 2,
+    "bonus_points_multiplier": STREAK_BONUS_MULTIPLIER,
+    "quick_fire_questions": QUICK_FIRE_QUESTIONS,
+    "mini_quiz_questions": MINI_QUIZ_QUESTIONS,
+    "mini_quiz_time_limit": MINI_QUIZ_TIME_LIMIT
+}
+
+# Achievement settings (Enhanced)
 ACHIEVEMENT_SETTINGS = {
-    "points_per_correct": 10,
-    "bonus_streak_multiplier": 1.5,
+    "points_per_correct": POINTS_PER_CORRECT,
+    "bonus_streak_multiplier": STREAK_BONUS_MULTIPLIER,
     "streak_threshold": 5,
     "daily_challenge_bonus": 50,
     "perfect_quiz_bonus": 25,
+}
+
+ACHIEVEMENT_CONFIG = {
+    "points_per_correct": ACHIEVEMENT_SETTINGS["points_per_correct"],
+    "bonus_points_streak": 5,
+    "daily_challenge_bonus": ACHIEVEMENT_SETTINGS["daily_challenge_bonus"],
+    "achievement_unlock_sound": True
 }
 
 # Scoring and Statistics
@@ -186,32 +276,199 @@ SCORING_SETTINGS = {
     "leaderboard_max_entries": 100,
 }
 
-# Question Categories (Linux Plus specific)
-QUESTION_CATEGORIES = [
-    "Hardware and System Configuration",
-    "Systems Operation and Maintenance", 
-    "Security",
-    "Linux Troubleshooting and Diagnostics",
-    "Automation and Scripting",
-]
+# =============================================================================
+# WEB FRAMEWORK SETTINGS
+# =============================================================================
 
-# Difficulty Levels
-DIFFICULTY_LEVELS = ["Beginner", "Intermediate", "Advanced", "Expert"]
-
-# File validation settings
-FILE_VALIDATION = {
-    "max_file_size": 50 * 1024 * 1024,  # 50MB
-    "allowed_extensions": [".json", ".txt", ".csv"],
-    "encoding": "utf-8",
+# Flask/FastAPI settings (Enhanced)
+WEB_CONFIG = {
+    "SECRET_KEY": os.getenv("SECRET_KEY", "dev-secret-key-change-in-production"),
+    "DEBUG": WEB_SETTINGS["debug_mode"],
+    "HOST": WEB_SETTINGS["default_host"],
+    "PORT": WEB_SETTINGS["default_port"],
+    "THREADED": WEB_SETTINGS["threaded"]
 }
 
-# Logging Configuration
+# Session configuration (Enhanced)
+SESSION_CONFIG = {
+    "SESSION_TYPE": "filesystem",
+    "SESSION_PERMANENT": False,
+    "SESSION_USE_SIGNER": True,
+    "SESSION_KEY_PREFIX": "linux_plus_study:",
+    "SESSION_COOKIE_HTTPONLY": True,
+    "SESSION_COOKIE_SECURE": False,  # Set to True in production with HTTPS
+    "SESSION_COOKIE_SAMESITE": "Lax",
+    "session_timeout": WEB_SETTINGS["session_timeout"]
+}
+
+# =============================================================================
+# SECURITY SETTINGS
+# =============================================================================
+
+# Authentication settings
+AUTH_CONFIG = {
+    "JWT_SECRET_KEY": os.getenv("JWT_SECRET_KEY", "jwt-secret-key-change-in-production"),
+    "JWT_ACCESS_TOKEN_EXPIRES": 3600,  # 1 hour
+    "JWT_REFRESH_TOKEN_EXPIRES": 2592000,  # 30 days
+    "PASSWORD_MIN_LENGTH": 8,
+    "REQUIRE_EMAIL_VERIFICATION": False,
+    "RATE_LIMIT_PER_MINUTE": 60
+}
+
+# CORS settings
+CORS_CONFIG = {
+    "CORS_ORIGINS": ["http://localhost:3000", "http://127.0.0.1:3000"],
+    "CORS_METHODS": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    "CORS_ALLOW_HEADERS": ["Content-Type", "Authorization"]
+}
+
+# =============================================================================
+# CACHING CONFIGURATION
+# =============================================================================
+
+# Redis settings
+REDIS_CONFIG = {
+    "REDIS_URL": os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+    "CACHE_TYPE": "redis",
+    "CACHE_DEFAULT_TIMEOUT": 300,
+    "CACHE_KEY_PREFIX": "linux_plus_study:"
+}
+
+# =============================================================================
+# FEATURE FLAGS
+# =============================================================================
+
+# Enable/disable features for gradual rollout
+FEATURE_FLAGS = {
+    "USE_DATABASE": os.getenv("USE_DATABASE", "False").lower() == "true",
+    "ENABLE_SPACED_REPETITION": True,
+    "ENABLE_ADAPTIVE_LEARNING": False,
+    "ENABLE_SOCIAL_FEATURES": False,
+    "ENABLE_API": True,
+    "ENABLE_WEBSOCKETS": False,
+    "ENABLE_OFFLINE_MODE": False,
+    "ENABLE_VOICE_COMMANDS": False
+}
+
+# =============================================================================
+# LEARNING ALGORITHM SETTINGS
+# =============================================================================
+
+# Spaced Repetition System settings
+SRS_CONFIG = {
+    "initial_interval": 1,  # days
+    "max_interval": 365,    # days
+    "ease_factor": 2.5,
+    "minimum_ease": 1.3,
+    "ease_bonus": 0.15,
+    "ease_penalty": 0.2
+}
+
+# Adaptive learning settings
+ADAPTIVE_CONFIG = {
+    "difficulty_adjustment_factor": 0.1,
+    "performance_window": 10,  # questions
+    "min_difficulty": 0.1,
+    "max_difficulty": 1.0
+}
+
+# =============================================================================
+# NOTIFICATION SETTINGS
+# =============================================================================
+
+# Email settings
+EMAIL_CONFIG = {
+    "MAIL_SERVER": os.getenv("MAIL_SERVER", "smtp.gmail.com"),
+    "MAIL_PORT": int(os.getenv("MAIL_PORT", "587")),
+    "MAIL_USE_TLS": True,
+    "MAIL_USERNAME": os.getenv("MAIL_USERNAME"),
+    "MAIL_PASSWORD": os.getenv("MAIL_PASSWORD"),
+    "MAIL_DEFAULT_SENDER": os.getenv("MAIL_DEFAULT_SENDER", "noreply@linuxplustudy.com")
+}
+
+# =============================================================================
+# LOGGING CONFIGURATION
+# =============================================================================
+
+# Logging Settings (Enhanced)
 LOGGING_SETTINGS = {
     "log_level": "INFO",
     "log_file": PROJECT_ROOT / "app.log",
     "max_log_size": 10 * 1024 * 1024,  # 10MB
     "backup_count": 5,
     "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+}
+
+LOGGING_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": LOGGING_SETTINGS["format"]
+        },
+    },
+    "handlers": {
+        "default": {
+            "level": LOGGING_SETTINGS["log_level"],
+            "formatter": "standard",
+            "class": "logging.StreamHandler",
+        },
+        "file": {
+            "level": "DEBUG",
+            "formatter": "standard",
+            "class": "logging.FileHandler",
+            "filename": str(LOGGING_SETTINGS["log_file"]),
+            "mode": "a",
+        },
+    },
+    "loggers": {
+        "": {
+            "handlers": ["default", "file"],
+            "level": "DEBUG",
+            "propagate": False
+        }
+    }
+}
+
+# =============================================================================
+# CATEGORIES AND DIFFICULTY LEVELS
+# =============================================================================
+
+# Question categories based on Linux+ certification domains (Enhanced)
+QUESTION_CATEGORIES = [
+    "Hardware and System Configuration",
+    "Systems Operation and Maintenance", 
+    "Security",
+    "Linux Troubleshooting and Diagnostics",
+    "Automation and Scripting",
+    # Additional technical categories
+    "hardware",
+    "system_architecture", 
+    "gnu_linux_installation",
+    "package_management",
+    "command_line",
+    "file_systems",
+    "boot_process",
+    "runlevels",
+    "text_processing",
+    "user_management",
+    "networking",
+    "shell_scripting",
+    "system_maintenance"
+]
+
+# Difficulty levels
+DIFFICULTY_LEVELS = ["Beginner", "Intermediate", "Advanced", "Expert"]
+
+# =============================================================================
+# USER INTERFACE AND MESSAGES
+# =============================================================================
+
+# File validation settings
+FILE_VALIDATION = {
+    "max_file_size": 50 * 1024 * 1024,  # 50MB
+    "allowed_extensions": [".json", ".txt", ".csv"],
+    "encoding": "utf-8",
 }
 
 # Error Messages
@@ -232,26 +489,10 @@ SUCCESS_MESSAGES = {
     "file_saved": "File saved successfully: {filename}",
 }
 
-# Development and Debug Settings
-DEBUG_SETTINGS = {
-    "verbose_logging": False,
-    "show_sql_queries": False,
-    "profile_performance": False,
-    "mock_data": False,
-}
-
-# API Configuration (for potential future web API)
-API_SETTINGS = {
-    "version": "v1",
-    "rate_limit": 100,  # requests per minute
-    "cors_enabled": False,
-    "authentication_required": False,
-}
-
 # User Interface Constants
 UI_CONSTANTS = {
     "page_title": "Linux Plus Study Tool",
-    "app_version": "2.0.0",
+    "app_version": APP_VERSION,
     "copyright": "© 2024 Linux Plus Study Tool",
     "support_email": "support@linuxplus.example.com",
 }
@@ -263,6 +504,89 @@ PERFORMANCE_SETTINGS = {
     "lazy_loading": True,
     "pagination_size": 20,
 }
+
+# =============================================================================
+# API CONFIGURATION
+# =============================================================================
+
+# API versioning (Enhanced)
+API_CONFIG = {
+    "API_PREFIX": "/api",
+    "API_VERSION": "v1",
+    "API_TITLE": "Linux+ Study API",
+    "API_DESCRIPTION": "RESTful API for Linux+ certification study tool",
+    "API_VERSION_HEADER": "X-API-Version"
+}
+
+# API Settings (Enhanced)  
+API_SETTINGS = {
+    "version": API_CONFIG["API_VERSION"],
+    "rate_limit": 100,  # requests per minute
+    "cors_enabled": False,
+    "authentication_required": False,
+}
+
+# Rate limiting (Enhanced)
+RATE_LIMIT_CONFIG = {
+    "DEFAULT_RATE_LIMIT": "100 per hour",
+    "AUTH_RATE_LIMIT": "10 per minute",
+    "QUIZ_RATE_LIMIT": "30 per hour",
+    "REGISTRATION_RATE_LIMIT": "5 per hour"
+}
+
+# =============================================================================
+# DEVELOPMENT/TESTING SETTINGS
+# =============================================================================
+
+# Development and Debug Settings (Enhanced)
+DEBUG_SETTINGS = {
+    "verbose_logging": False,
+    "show_sql_queries": False,
+    "profile_performance": False,
+    "mock_data": False,
+}
+
+# Testing configuration (Enhanced)
+TEST_CONFIG = {
+    "TESTING": True,
+    "WTF_CSRF_ENABLED": False,
+    "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+    "SERVER_NAME": "localhost.localdomain"
+}
+
+# Development settings (Enhanced)
+DEV_CONFIG = {
+    "FLASK_ENV": "development",
+    "FLASK_DEBUG": True,
+    "TEMPLATES_AUTO_RELOAD": WEB_SETTINGS["template_auto_reload"],
+    "SEND_FILE_MAX_AGE_DEFAULT": 0
+}
+
+# =============================================================================
+# UTILITY FUNCTIONS
+# =============================================================================
+
+def get_database_url():
+    """Get the appropriate database URL based on environment"""
+    if os.getenv("DATABASE_URL"):
+        return os.getenv("DATABASE_URL")
+    elif FEATURE_FLAGS["USE_DATABASE"]:
+        return POSTGRESQL_URL
+    else:
+        return SQLITE_URL
+
+def is_production():
+    """Check if running in production environment"""
+    return os.getenv("FLASK_ENV") == "production"
+
+def get_config_for_environment():
+    """Get configuration based on current environment"""
+    if os.getenv("TESTING"):
+        return TEST_CONFIG
+    elif is_production():
+        return {**WEB_CONFIG, "DEBUG": False, "SECRET_KEY": os.getenv("SECRET_KEY")}
+    else:
+        return {**WEB_CONFIG, **DEV_CONFIG}
 
 def get_config_value(section, key, default=None):
     """
@@ -339,12 +663,49 @@ def ensure_directories():
     for directory in directories:
         directory.mkdir(parents=True, exist_ok=True)
 
-# Environment-specific overrides
+# =============================================================================
+# VALIDATION
+# =============================================================================
+
+def validate_config():
+    """Validate critical configuration settings"""
+    errors = []
+    
+    if is_production():
+        if WEB_CONFIG["SECRET_KEY"] == "dev-secret-key-change-in-production":
+            errors.append("SECRET_KEY must be changed in production")
+        
+        if AUTH_CONFIG["JWT_SECRET_KEY"] == "jwt-secret-key-change-in-production":
+            errors.append("JWT_SECRET_KEY must be changed in production")
+    
+    # Validate file paths exist
+    if not FEATURE_FLAGS["USE_DATABASE"]:
+        DATA_DIR.mkdir(exist_ok=True)
+        if not QUESTIONS_FILE.exists():
+            errors.append(f"Questions file not found: {QUESTIONS_FILE}")
+    
+    return errors
+
+# =============================================================================
+# ENVIRONMENT-SPECIFIC OVERRIDES
+# =============================================================================
+
+# Environment-specific overrides (Enhanced)
 if os.getenv("FLASK_ENV") == "development":
     WEB_SETTINGS["debug_mode"] = True
+    WEB_CONFIG["DEBUG"] = True
     DEBUG_SETTINGS["verbose_logging"] = True
 
 if os.getenv("PRODUCTION") == "true":
     WEB_SETTINGS["debug_mode"] = False
+    WEB_CONFIG["DEBUG"] = False
     DEBUG_SETTINGS["verbose_logging"] = False
     LOGGING_SETTINGS["log_level"] = "WARNING"
+
+# Auto-validate configuration on import
+if __name__ != "__main__":
+    config_errors = validate_config()
+    if config_errors:
+        import warnings
+        for error in config_errors:
+            warnings.warn(f"Configuration warning: {error}")
