@@ -12,31 +12,55 @@ import os
 from datetime import datetime
 from typing import List, Tuple, Optional, Dict, Any
 from utils.config import SAMPLE_QUESTIONS
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import Column, Integer, String, Text, JSON
+from sqlalchemy import create_engine
+
+Base = declarative_base()
 
 
-class Question:
-    """Represents a single quiz question."""
+class Question(Base):
+    __tablename__ = 'questions'
     
-    def __init__(self, text: str, options: List[str], correct_index: int, 
-                 category: str, explanation: str = ""):
-        """
-        Initialize a question.
-        
-        Args:
-            text (str): The question text
-            options (List[str]): List of answer options
-            correct_index (int): Index of the correct answer (0-based)
-            category (str): Question category
-            explanation (str): Explanation of the answer
-        """
-        self.text = text
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    question_text = Column(Text, nullable=False)
+    options = Column(JSON, nullable=False)  # Store list of options as JSON
+    correct_answer = Column(String(10), nullable=False)  # e.g., 'A', 'B', 'C', 'D'
+    category = Column(String(100), nullable=False)
+    difficulty = Column(String(20), nullable=False)  # e.g., 'Easy', 'Medium', 'Hard'
+    
+    def __init__(self, question_text, options, correct_answer, category, difficulty):
+        self.question_text = question_text
         self.options = options
-        self.correct_index = correct_index
+        self.correct_answer = correct_answer
         self.category = category
-        self.explanation = explanation
-        
-        # Validate the question data
-        self._validate()
+        self.difficulty = difficulty
+    
+    def to_dict(self):
+        """Convert the question object to a dictionary - KEEP this method"""
+        return {
+            'id': self.id,
+            'question_text': self.question_text,
+            'options': self.options,
+            'correct_answer': self.correct_answer,
+            'category': self.category,
+            'difficulty': self.difficulty
+        }
+    
+    @classmethod
+    def from_dict(cls, data):
+        """Create a question object from a dictionary - KEEP but UPDATE"""
+        return cls(
+            question_text=data['question_text'],
+            options=data['options'],
+            correct_answer=data['correct_answer'],
+            category=data['category'],
+            difficulty=data['difficulty']
+        )
+    
+    def __repr__(self):
+        return f"<Question(id={self.id}, category='{self.category}', difficulty='{self.difficulty}')>"
     
     def _validate(self):
         """Validate question data integrity."""
@@ -181,91 +205,54 @@ class QuestionManager:
         # Load questions from various sources
         self.load_questions()
     
-    def load_questions(self):
-        """Load questions from various sources with enhanced error reporting."""
-        self.questions = []
-        total_loaded = 0
+    def get_database_session(database_url="sqlite:///linux_plus_study.db"):
+        """Create and return a database session"""
+        engine = create_engine(database_url)
+        Base.metadata.create_all(engine)  # Create tables if they don't exist
+        Session = sessionmaker(bind=engine)
+        return Session()
+
+    def load_questions_from_db(session, category=None, difficulty=None):
+        """Load questions from database with optional filtering"""
+        query = session.query(Question)
         
-        # Start with sample questions from config
-        sample_count = 0
-        for question_tuple in SAMPLE_QUESTIONS:
-            try:
-                question = Question.from_tuple(question_tuple)
-                self.questions.append(question)
-                sample_count += 1
-            except ValueError as e:
-                print(f"Warning: Invalid sample question skipped: {e}")
+        if category:
+            query = query.filter(Question.category == category)
+        if difficulty:
+            query = query.filter(Question.difficulty == difficulty)
         
-        if sample_count > 0:
-            print(f"✓ Loaded {sample_count} sample questions from config")
-            total_loaded += sample_count
+        return query.all()
+
+    def get_question_by_id(session, question_id):
+        """Get a specific question by ID"""
+        return session.query(Question).filter(Question.id == question_id).first()
+
+    def get_categories(session):
+        """Get all unique categories"""
+        return [cat[0] for cat in session.query(Question.category).distinct().all()]
+
+    def get_difficulties(session):
+        """Get all unique difficulty levels"""
+        return [diff[0] for diff in session.query(Question.difficulty).distinct().all()]
+    def migrate_json_to_db(json_file_path, session):
+        """One-time migration function to move questions from JSON file to database"""
+        import json
         
-        # Try to load additional questions from JSON file in root directory
-        json_files_to_try = [
-            "linux_plus_questions.json",
-            "data/questions.json",
-            os.path.join("data", "questions.json"),
-            "questions.json"
-        ]
+        with open(json_file_path, 'r') as f:
+            questions_data = json.load(f)
         
-        for json_file in json_files_to_try:
-            try:
-                if os.path.exists(json_file):
-                    print(f"📁 Found questions file: {json_file}")
-                    additional_questions = self._load_from_json_file(json_file)
-                    if additional_questions:
-                        self.questions.extend(additional_questions)
-                        print(f"✓ Loaded {len(additional_questions)} questions from {json_file}")
-                        total_loaded += len(additional_questions)
-                        break  # Stop after first successful load
-                    else:
-                        print(f"⚠️  File {json_file} exists but contains no valid questions")
-                else:
-                    print(f"📂 File not found: {json_file}")
-            except FileNotFoundError:
-                print(f"📂 File not found: {json_file}")
-                continue
-            except json.JSONDecodeError as e:
-                print(f"❌ JSON parsing error in {json_file}: {e}")
-                continue
-            except Exception as e:
-                print(f"❌ Error loading questions from {json_file}: {e}")
-                continue
-        
-        # Validate that we have questions loaded
-        if not self.questions:
-            print("❌ CRITICAL: No questions were loaded from any source!")
-            print("🔍 Checked locations:")
-            for json_file in json_files_to_try:
-                abs_path = os.path.abspath(json_file)
-                exists = "✓" if os.path.exists(json_file) else "✗"
-                print(f"   {exists} {abs_path}")
+        for question_data in questions_data:
+            # Check if question already exists to avoid duplicates
+            existing = session.query(Question).filter(
+                Question.question_text == question_data['question_text']
+            ).first()
             
-            # Create minimal fallback questions if none found
-            fallback_question = Question(
-                text="What is the Linux kernel?",
-                options=["The core of the Linux operating system", "A shell program", "A file manager", "A text editor"],
-                correct_index=0,
-                category="Linux Basics",
-                explanation="The Linux kernel is the core component that manages system resources."
-            )
-            self.questions.append(fallback_question)
-            print("🚨 Using fallback question to prevent crash")
+            if not existing:
+                question = Question.from_dict(question_data)
+                session.add(question)
         
-        # Shuffle questions once on load for variety
-        random.shuffle(self.questions)
-        
-        # Update categories set
-        self.categories = set(q.category for q in self.questions)
-        
-        # Final status report
-        print(f"\n📊 Question Loading Summary:")
-        print(f"   Total questions loaded: {len(self.questions)}")
-        print(f"   Categories available: {len(self.categories)}")
-        print(f"   Categories: {', '.join(sorted(self.categories))}")
-        
-        if len(self.questions) < 10:
-            print(f"⚠️  Warning: Only {len(self.questions)} questions loaded. Consider adding more questions to data/questions.json")
+        session.commit()
+        print(f"Migrated {len(questions_data)} questions to database")
     
     def _load_from_json_file(self, filename: str) -> List[Question]:
         """
@@ -609,3 +596,32 @@ class QuestionManager:
                 errors.append(f"Question {i + 1}: {e}")
         
         return errors
+    def create_question(session, question_text, options, correct_answer, category, difficulty):
+        """Creates and saves a new question to the database."""
+        question = Question(question_text, options, correct_answer, category, difficulty)
+        session.add(question)
+        session.commit()
+        return question
+
+    def get_question_by_id(session, question_id):
+        """Retrieves a specific question by ID."""
+        return session.query(Question).filter(Question.id == question_id).first()
+
+    def update_question(session, question_id, **kwargs):
+        """Updates a question with the provided fields."""
+        question = session.query(Question).filter(Question.id == question_id).first()
+        if question:
+            for key, value in kwargs.items():
+                if hasattr(question, key):
+                    setattr(question, key, value)
+            session.commit()
+        return question
+
+    def delete_question(session, question_id):
+        """Deletes a question from the database."""
+        question = session.query(Question).filter(Question.id == question_id).first()
+        if question:
+            session.delete(question)
+            session.commit()
+            return True
+        return False
