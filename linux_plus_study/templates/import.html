@@ -420,7 +420,67 @@ What command lists files?
             progressBar.style.display = 'none';
             progressFill.style.width = '0%';
         }
+        function refreshUIAfterImport() {
+            // Refresh question count
+            fetch('/api/question-count')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Update question count display
+                        const countElements = document.querySelectorAll('[data-question-count]');
+                        countElements.forEach(el => {
+                            el.textContent = data.count;
+                        });
+                        
+                        // Update category dropdowns if they exist
+                        if (data.categories && data.categories.length > 0) {
+                            const categorySelects = document.querySelectorAll('select[name="category"], #categoryFilter');
+                            categorySelects.forEach(select => {
+                                // Keep current selection
+                                const currentValue = select.value;
+                                
+                                // Clear and rebuild options
+                                select.innerHTML = '<option value="">All Categories</option>';
+                                data.categories.forEach(category => {
+                                    const option = document.createElement('option');
+                                    option.value = category;
+                                    option.textContent = category;
+                                    if (category === currentValue) {
+                                        option.selected = true;
+                                    }
+                                    select.appendChild(option);
+                                });
+                            });
+                        }
+                        
+                        console.log(`✅ UI refreshed: ${data.count} questions, ${data.categories.length} categories`);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error refreshing UI:', error);
+                });
+        }
 
+        // Call this function after successful import
+        // Example: Add to your import success handler
+        document.addEventListener('importSuccess', function() {
+            setTimeout(refreshUIAfterImport, 500); // Small delay to ensure data is saved
+        });
+
+        // Or trigger refresh manually
+        function triggerRefresh() {
+            fetch('/api/refresh', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        refreshUIAfterImport();
+                        console.log('✅ Data and UI refreshed:', data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error triggering refresh:', error);
+                });
+        }
         // Form submission handler
         importForm.addEventListener('submit', async (e) => {
             e.preventDefault();
