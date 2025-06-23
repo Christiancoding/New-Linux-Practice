@@ -1,1292 +1,1588 @@
 #!/usr/bin/env python3
 """
-FastAPI Web View for the Linux+ Study Game.
-Modern ASGI-based web interface with async support.
+Web View for the Linux+ Study Game using Flask + pywebview.
+Creates a desktop app with modern web interface.
 """
 
-from fastapi import FastAPI, Request, HTTPException, Depends, BackgroundTasks, UploadFile, File, Form
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from pydantic import BaseModel
-from typing import Optional, Dict, Any, List
+import webview
+import threading
+import time
+from flask import Flask, render_template, request, jsonify, send_from_directory, session, send_file, flash, redirect, url_for
 import os
 import json
-import logging
-import asyncio
-import time
 from datetime import datetime
+import hashlib
+import time
+import logging
 import traceback
-from pathlib import Path
-import re
-
-# Import your existing controllers and utilities
 from utils.cli_playground import get_cli_playground
+import subprocess
+import shlex
 from utils.config import (
     QUICK_FIRE_QUESTIONS, QUICK_FIRE_TIME_LIMIT, MINI_QUIZ_QUESTIONS,
     POINTS_PER_CORRECT, POINTS_PER_INCORRECT, STREAK_BONUS_THRESHOLD, STREAK_BONUS_MULTIPLIER
 )
+from werkzeug.utils import secure_filename
+import tempfile
+import mimetypes
 
-# Pydantic models for request/response validation
-class QuizStartRequest(BaseModel):
-    mode: str = "standard"
-    category: Optional[str] = None
+cli_playground = get_cli_playground()
 
-class AnswerSubmissionRequest(BaseModel):
-    answer_index: int  # Changed from 'answer' to 'answer_index' to match frontend
-    question_id: Optional[str] = None
-
-class SettingsRequest(BaseModel):
-    focusMode: bool = False
-    breakReminder: int = 10
-
-class CLICommandRequest(BaseModel):
-    command: str
-
-class FullscreenRequest(BaseModel):
-    enable: bool = True
-
-class LinuxPlusStudyFastAPI:
-    """FastAPI-based web interface with modern async capabilities."""
+class LinuxPlusStudyWeb:
+    """Web interface using Flask + pywebview for desktop app experience."""
     
-    def __init__(self, game_state, debug: bool = False):
+    def __init__(self, game_state, debug=False):
         self.game_state = game_state
+        self.app = Flask(__name__, 
+                        template_folder=os.path.join(os.path.dirname(__file__), '..', 'templates'),
+                        static_folder=os.path.join(os.path.dirname(__file__), '..', 'static'))
         self.debug = debug
+        self.window = None
+
+        # Add caching to reduce lag
+        self.app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 300  # Cache static files for 5 minutes
+        self.app.config['TEMPLATES_AUTO_RELOAD'] = False  # Disable template auto-reload in production
+        self.setup_cli_playground_routes(self.app)
         
-        # Initialize FastAPI app
-        self.app = FastAPI(
-            title="Linux+ Study Game",
-            description="Interactive Linux+ certification preparation tool",
-            version="2.0.0",
-            docs_url="/api/docs",  # Always enable docs for testing
-            redoc_url="/api/redoc"  # Always enable redoc
-        )
-        
-        # Setup paths
-        self.base_dir = Path(__file__).parent.parent
-        self.template_dir = self.base_dir / "templates"
-        self.static_dir = self.base_dir / "static"
-        
-        # Initialize templates
-        self.templates = Jinja2Templates(directory=str(self.template_dir))
-        
-        # Initialize CLI playground
-        self.cli_playground = get_cli_playground()
-        
-        # Import controllers
+        # Session configuration for better performance
+        self.app.secret_key = 'your-secret-key-here'  # Add a proper secret key
+        self.app.config['SESSION_TYPE'] = 'filesystem'
+        self.app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour
+
         from controllers.quiz_controller import QuizController
         from controllers.stats_controller import StatsController
         
         self.quiz_controller = QuizController(game_state)
         self.stats_controller = StatsController(game_state)
-        
-        # Initialize session state
         self.current_category_filter = None
         self.current_question_data = None
         self.current_question_index = -1
         
-        # Setup middleware and routes
-        self.setup_middleware()
-        self.setup_static_files()
         self.setup_routes()
+    def _should_show_break_reminder(self):
+        """Check if break reminder should be shown based on current settings."""
+        disabled_modes = {'daily_challenge', 'pop_quiz', 'quick_fire', 'mini_quiz'}
+        if self.quiz_controller.current_quiz_mode in disabled_modes:
+            return False
+        try:
+            settings = self._load_web_settings()
+            break_interval = settings.get('breakReminder', 10)
+            
+            # Check if break reminders are enabled (interval > 0) and threshold met
+            return (break_interval > 0 and 
+                    self.quiz_controller.questions_since_break >= break_interval)
+        except:
+            return False
     
-    def setup_middleware(self):
-        """Configure FastAPI middleware."""
-        # CORS middleware
-        self.app.add_middleware(
-            CORSMiddleware,
-            allow_origins=["*"],
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
+    def _get_break_interval(self):
+        """Get the current break reminder interval from settings."""
+        try:
+            settings = self._load_web_settings()
+            return settings.get('breakReminder', 10)
+        except:
+            return 10
+
+    def _load_web_settings(self):
+        """Load settings from web_settings.json file."""
+        try:
+            if os.path.exists('web_settings.json'):
+                with open('web_settings.json', 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            print(f"Error loading web settings: {e}")
         
-        # Trusted host middleware for security
-        self.app.add_middleware(
-            TrustedHostMiddleware,
-            allowed_hosts=["127.0.0.1", "localhost", "*.localhost"]
-        )
-    
-    def setup_static_files(self):
-        """Mount static file directories."""
-        # Mount static files with proper configuration
-        self.app.mount("/static", StaticFiles(directory=str(self.static_dir)), name="static")
-    
+        # Return default settings if file doesn't exist or can't be loaded
+        return {'focusMode': False, 'breakReminder': 10}
+
+    def toggle_fullscreen(self, enable=True):
+        """Toggle application window fullscreen."""
+        try:
+            if hasattr(self, 'window') and self.window:
+                self.window.fullscreen = enable
+                return {'success': True, 'fullscreen': enable}
+            return {'success': False, 'error': 'Window not available'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def is_fullscreen(self):
+        """Check if window is in fullscreen mode."""
+        try:
+            if hasattr(self, 'window') and self.window:
+                return {'success': True, 'fullscreen': getattr(self.window, 'fullscreen', False)}
+            return {'success': False, 'fullscreen': False}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+    def setup_cli_playground_routes(self, app):
+        """Setup CLI playground API routes"""
+        
+        # Store command history in memory (you could also use a file)
+        self.cli_history = []
+        
+        @app.route('/api/cli/execute', methods=['POST'])
+        def execute_cli_command():
+            try:
+                data = request.get_json()
+                command = data.get('command', '').strip()
+                
+                if not command:
+                    return jsonify({'success': False, 'error': 'No command provided'})
+                
+                # Add to history
+                self.cli_history.append(command)
+                
+                # Handle built-in commands
+                if command == 'clear':
+                    return jsonify({'success': True, 'output': 'CLEAR_SCREEN'})
+                
+                if command == 'help':
+                    help_text = self._get_help_text()
+                    return jsonify({'success': True, 'output': help_text})
+                
+                # Handle simulated file system commands
+                output = self._simulate_command(command)
+                if output is not None:
+                    return jsonify({'success': True, 'output': output})
+                
+                # For real system commands (restricted set)
+                allowed_commands = ['ls', 'pwd', 'whoami', 'date', 'echo', 'cat', 'grep', 'find', 'wc', 'head', 'tail']
+                cmd_parts = shlex.split(command)
+                
+                if not cmd_parts or cmd_parts[0] not in allowed_commands:
+                    return jsonify({
+                        'success': False, 
+                        'error': f'Command "{cmd_parts[0] if cmd_parts else command}" not available in this sandbox environment.\nType "help" to see available commands.'
+                    })
+                
+                # Execute safe command
+                try:
+                    result = subprocess.run(cmd_parts, capture_output=True, text=True, timeout=10)
+                    output = result.stdout if result.returncode == 0 else result.stderr
+                    return jsonify({'success': True, 'output': output})
+                except subprocess.TimeoutExpired:
+                    return jsonify({'success': False, 'error': 'Command timed out'})
+                except Exception as e:
+                    return jsonify({'success': False, 'error': f'Error: {str(e)}'})
+                    
+            except Exception as e:
+                return jsonify({'success': False, 'error': f'Server error: {str(e)}'})
+
+        @app.route('/api/cli/clear', methods=['POST'])
+        def clear_cli_history():
+            """Clear CLI command history"""
+            try:
+                self.cli_history = []
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'History cleared'
+                })
+                
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Server error: {str(e)}'
+                })
+
+        @app.route('/api/cli/commands', methods=['GET'])
+        def get_available_commands():
+            """Get list of available CLI commands"""
+            try:
+                commands = list(cli_playground.safe_commands.keys())
+                commands.sort()
+                
+                command_descriptions = {
+                    # Basic File Operations
+                    'ls': 'List directory contents',
+                    'pwd': 'Print working directory',
+                    'cd': 'Change directory',
+                    'cat': 'Display file contents',
+                    'mkdir': 'Create directory',
+                    'touch': 'Create empty file',
+                    'rm': 'Remove file',
+                    'cp': 'Copy file',
+                    'mv': 'Move/rename file',
+                    
+                    # Text Processing & Search
+                    'grep': 'Search for pattern in file',
+                    'head': 'Display first lines of file',
+                    'tail': 'Display last lines of file',
+                    'wc': 'Word, line, character count',
+                    'sort': 'Sort lines in file',
+                    'uniq': 'Remove duplicate lines',
+                    'echo': 'Display text',
+                    'find': 'Find files and directories',
+                    
+                    # System Information
+                    'whoami': 'Display current user',
+                    'date': 'Display current date and time',
+                    'ps': 'Display running processes',
+                    'df': 'Show filesystem usage',
+                    'free': 'Show memory usage',
+                    'uptime': 'Show system uptime',
+                    'uname': 'Display system information',
+                    'top': 'Show system resource usage',
+                    
+                    # Interface & Utilities
+                    'help': 'Show available commands',
+                    'clear': 'Clear terminal screen',
+                    'history': 'Show command history',
+                    
+                    # Linux+ Boot & System Management
+                    'grub2-install': 'Install GRUB2 bootloader',
+                    'grub2-mkconfig': 'Generate GRUB configuration',
+                    'update-grub': 'Update GRUB configuration (Debian)',
+                    'mkinitrd': 'Create initial ramdisk image',
+                    'dracut': 'Create initramfs image',
+                    
+                    # Linux+ Service & Process Management  
+                    'systemctl': 'Control systemd services',
+                    'journalctl': 'View systemd journal logs',
+                    
+                    # Linux+ Network & Security
+                    'nmap': 'Network mapper and port scanner',
+                    'firewall-cmd': 'Firewall configuration utility',
+                    'iptables': 'Advanced firewall rules',
+                    
+                    # Linux+ Hardware & Modules
+                    'lsmod': 'List loaded kernel modules',
+                    'modprobe': 'Load/unload kernel modules',
+                    'lsblk': 'List block devices',
+                    'fdisk': 'Disk partitioning utility',
+                    
+                    # Linux+ Filesystem Operations
+                    'mount': 'Mount filesystem',
+                    'umount': 'Unmount filesystem'
+                }
+                
+                result = []
+                for cmd in commands:
+                    result.append({
+                        'command': cmd,
+                        'description': command_descriptions.get(cmd, 'No description available')
+                    })
+                
+                return jsonify({
+                    'success': True,
+                    'commands': result
+                })
+                
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Error loading commands: {str(e)}'
+                })
+
+        @app.route('/api/cli/history', methods=['GET'])
+        def get_cli_history():
+            """Get CLI command history"""
+            try:
+                return jsonify({
+                    'success': True,
+                    'history': self.cli_history
+                })
+                
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Error loading history: {str(e)}'
+                })
+    def setup_export_import_routes(self):
+        """Setup routes for export and import functionality."""
+        
+        @self.app.route('/export/qa/md')
+        def export_qa_markdown():
+            """Export questions and answers to Markdown format with proper download headers."""
+            try:
+                if not self.game_state.questions:
+                    return jsonify({
+                        'success': False, 
+                        'message': 'No questions are currently loaded to export.'
+                    }), 400
+                
+                # Generate filename with timestamp
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"Linux_plus_QA_{timestamp}.md"
+                
+                # Create content in memory instead of temporary file
+                content_lines = []
+                
+                # Write Questions Section
+                content_lines.append("# Questions\n")
+                for i, q_data in enumerate(self.game_state.questions):
+                    if len(q_data) < 5: 
+                        continue
+                    question_text, options, _, category, _ = q_data
+                    content_lines.append(f"**Q{i+1}.** ({category})")
+                    content_lines.append(f"{question_text}")
+                    for j, option in enumerate(options):
+                        content_lines.append(f"   {chr(ord('A') + j)}. {option}")
+                    content_lines.append("")
+
+                content_lines.append("---\n")
+
+                # Write Answers Section
+                content_lines.append("# Answers\n")
+                for i, q_data in enumerate(self.game_state.questions):
+                    if len(q_data) < 5: 
+                        continue
+                    _, options, correct_answer_index, _, explanation = q_data
+                    if 0 <= correct_answer_index < len(options):
+                        correct_option_letter = chr(ord('A') + correct_answer_index)
+                        correct_option_text = options[correct_answer_index]
+                        content_lines.append(f"**A{i+1}.** {correct_option_letter}. {correct_option_text}")
+                        if explanation:
+                            explanation_lines = explanation.split('\n')
+                            content_lines.append("   *Explanation:*")
+                            for line in explanation_lines:
+                                content_lines.append(f"   {line.strip()}")
+                        content_lines.append("")
+                    else:
+                        content_lines.append(f"**A{i+1}.** Error: Invalid correct answer index.")
+                        content_lines.append("")
+                
+                # Join content
+                content = '\n'.join(content_lines)
+                
+                # Create response with proper headers
+                from flask import Response
+                response = Response(
+                    content,
+                    mimetype='text/markdown',
+                    headers={
+                        'Content-Disposition': f'attachment; filename="{filename}"',
+                        'Content-Type': 'text/markdown; charset=utf-8',
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache',
+                        'Expires': '0'
+                    }
+                )
+                
+                return response
+                
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'message': f'Error exporting Q&A to Markdown: {str(e)}'
+                }), 500
+
+        @self.app.route('/export/qa/json')
+        def export_qa_json():
+            """Export questions and answers to JSON format with proper download headers."""
+            try:
+                if not self.game_state.questions:
+                    return jsonify({
+                        'success': False,
+                        'message': 'No questions are currently loaded to export.'
+                    }), 400
+                
+                # Generate filename with timestamp
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"Linux_plus_QA_{timestamp}.json"
+                
+                # Prepare questions data for JSON export
+                questions_data = []
+                for i, q_data in enumerate(self.game_state.questions):
+                    if len(q_data) < 5: 
+                        continue
+                    question_text, options, correct_answer_index, category, explanation = q_data
+                    
+                    question_obj = {
+                        "id": i + 1,
+                        "question": question_text,
+                        "category": category,
+                        "options": options,
+                        "correct_answer_index": correct_answer_index,
+                        "correct_answer_letter": chr(ord('A') + correct_answer_index) if 0 <= correct_answer_index < len(options) else "Invalid",
+                        "correct_answer_text": options[correct_answer_index] if 0 <= correct_answer_index < len(options) else "Invalid index",
+                        "explanation": explanation if explanation else ""
+                    }
+                    questions_data.append(question_obj)
+
+                # Create the final JSON structure
+                export_data = {
+                    "metadata": {
+                        "title": "Linux+ Study Questions",
+                        "export_date": datetime.now().isoformat(),
+                        "total_questions": len(questions_data),
+                        "categories": sorted(list(set(q["category"] for q in questions_data)))
+                    },
+                    "questions": questions_data
+                }
+                
+                # Convert to JSON string
+                json_content = json.dumps(export_data, indent=2, ensure_ascii=False)
+                
+                # Create response with proper headers
+                from flask import Response
+                response = Response(
+                    json_content,
+                    mimetype='application/json',
+                    headers={
+                        'Content-Disposition': f'attachment; filename="{filename}"',
+                        'Content-Type': 'application/json; charset=utf-8',
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache',
+                        'Expires': '0'
+                    }
+                )
+                
+                return response
+                
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'message': f'Error exporting Q&A to JSON: {str(e)}'
+                }), 500
+
+        @self.app.route('/import/questions', methods=['GET', 'POST'])
+        def import_questions():
+            """Enhanced import with duplicate detection and comprehensive reporting."""
+            if request.method == 'GET':
+                return render_template('import.html')
+            
+            try:
+                # File validation (existing code...)
+                if 'file' not in request.files:
+                    return jsonify({'success': False, 'message': 'No file was uploaded.'}), 400
+                
+                file = request.files['file']
+                if file.filename == '':
+                    return jsonify({'success': False, 'message': 'No file was selected.'}), 400
+                
+                filename = secure_filename(file.filename)
+                file_ext = filename.lower().split('.')[-1] if '.' in filename else ''
+                
+                if file_ext not in ['json', 'md']:
+                    return jsonify({
+                        'success': False,
+                        'message': 'Only JSON and Markdown (.md) files are supported.'
+                    }), 400
+                
+                # File size validation
+                file.seek(0, 2)
+                file_size = file.tell()
+                file.seek(0)
+                
+                if file_size > 10 * 1024 * 1024:  # 10MB limit
+                    return jsonify({
+                        'success': False,
+                        'message': 'File size too large. Maximum size is 10MB.'
+                    }), 400
+                
+                # Read and parse content
+                try:
+                    file_content = file.read().decode('utf-8')
+                except UnicodeDecodeError:
+                    return jsonify({
+                        'success': False,
+                        'message': 'File encoding error. Please ensure the file is UTF-8 encoded.'
+                    }), 400
+                
+                # Parse questions
+                if file_ext == 'json':
+                    imported_questions = self._parse_json_questions(file_content)
+                elif file_ext == 'md':
+                    imported_questions = self._parse_markdown_questions(file_content)
+                
+                if not imported_questions:
+                    return jsonify({
+                        'success': False,
+                        'message': 'No valid questions found in the uploaded file.'
+                    }), 400
+                
+                # Apply duplicate detection
+                filtered_questions, duplicate_report = self._detect_and_eliminate_duplicates(imported_questions)
+                
+                # Add questions to system
+                total_added = 0
+                errors = []
+                
+                for question_data in filtered_questions:
+                    try:
+                        # Validate question structure
+                        if not question_data.get('question', '').strip():
+                            errors.append(f"Question with empty text skipped")
+                            continue
+                        
+                        if not question_data.get('options') or len(question_data['options']) < 2:
+                            errors.append(f"Question with insufficient options skipped")
+                            continue
+                        
+                        # Convert to tuple format
+                        question_tuple = (
+                            question_data.get('question', ''),
+                            question_data.get('options', []),
+                            question_data.get('correct_answer_index', 0),
+                            question_data.get('category', 'General'),
+                            question_data.get('explanation', '')
+                        )
+                        
+                        if self._add_question_to_pool(question_tuple):
+                            total_added += 1
+                        else:
+                            errors.append(f"Failed to add question to pool")
+                            
+                    except Exception as e:
+                        errors.append(f"Error processing question: {str(e)}")
+                        continue
+                
+                # Prepare comprehensive response
+                response_message = f'Successfully imported {total_added} unique questions from {filename}.'
+                
+                if duplicate_report['duplicates_found'] > 0:
+                    response_message += f'\n{duplicate_report["duplicates_found"]} duplicates were detected and skipped.'
+                
+                if errors:
+                    response_message += f'\n{len(errors)} questions had processing errors.'
+                
+                return jsonify({
+                    'success': True,
+                    'message': response_message,
+                    'total_imported': total_added,
+                    'duplicate_report': duplicate_report,
+                    'errors': errors[:10] if errors else []  # Limit error details
+                })
+                
+            except Exception as e:
+                import traceback
+                error_details = traceback.format_exc()
+                print(f"Import error: {error_details}")
+                
+                return jsonify({
+                    'success': False,
+                    'message': f'Error importing questions: {str(e)}'
+                }), 500
+    def _parse_json_questions(self, content):
+        """
+        Parse questions from JSON content with comprehensive format support.
+        
+        Args:
+            content (str): JSON content string
+            
+        Returns:
+            List[dict]: Normalized question dictionaries
+            
+        Raises:
+            ValueError: If JSON format is invalid or unsupported
+        """
+        try:
+            data = json.loads(content)
+            questions = []
+            
+            # Handle different JSON formats
+            if isinstance(data, list):
+                # Direct list of questions
+                for item in data:
+                    if isinstance(item, dict):
+                        questions.append(self._normalize_question_dict(item))
+                    elif isinstance(item, (list, tuple)) and len(item) >= 4:
+                        # Handle tuple format: (question, options, correct_index, category, explanation)
+                        questions.append({
+                            'question': str(item[0]),
+                            'options': list(item[1]) if len(item) > 1 else [],
+                            'correct_answer_index': int(item[2]) if len(item) > 2 else 0,
+                            'category': str(item[3]) if len(item) > 3 else 'General',
+                            'explanation': str(item[4]) if len(item) > 4 else ''
+                        })
+                            
+            elif isinstance(data, dict):
+                if 'questions' in data:
+                    # Structured format with metadata
+                    for item in data['questions']:
+                        if isinstance(item, dict):
+                            questions.append(self._normalize_question_dict(item))
+                        elif isinstance(item, (list, tuple)) and len(item) >= 4:
+                            questions.append({
+                                'question': str(item[0]),
+                                'options': list(item[1]) if len(item) > 1 else [],
+                                'correct_answer_index': int(item[2]) if len(item) > 2 else 0,
+                                'category': str(item[3]) if len(item) > 3 else 'General',
+                                'explanation': str(item[4]) if len(item) > 4 else ''
+                            })
+                else:
+                    # Single question object
+                    questions.append(self._normalize_question_dict(data))
+            
+            return questions
+            
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON format: {e}")
+        except Exception as e:
+            raise ValueError(f"Error parsing JSON content: {e}")
+
+    def _parse_markdown_questions(self, content):
+            """
+            Enhanced markdown parser for Linux+ study format with comprehensive validation.
+            
+            Handles format:
+            **Q1.** (Category)
+            Question text
+            A. Option A
+            B. Option B
+            ...
+            
+            **A1.** C. Option text
+            *Explanation:* Detailed explanation
+            """
+            questions = []
+            lines = content.split('\n')
+            
+            # State tracking variables
+            in_questions_section = False
+            in_answers_section = False
+            current_question = None
+            current_options = []
+            answers_dict = {}
+            explanations_dict = {}
+            
+            # Enhanced parsing with robust error handling
+            i = 0
+            while i < len(lines):
+                line = lines[i].strip()
+                
+                try:
+                    # Section detection
+                    if line == "# Questions":
+                        in_questions_section = True
+                        in_answers_section = False
+                        i += 1
+                        continue
+                    elif line == "# Answers":
+                        in_questions_section = False
+                        in_answers_section = True
+                        i += 1
+                        continue
+                    elif line == "---":
+                        in_questions_section = False
+                        i += 1
+                        continue
+                    
+                    # Question parsing
+                    elif in_questions_section and line.startswith("**Q"):
+                        # Save previous question if exists
+                        if current_question and current_options:
+                            questions.append({
+                                'question_number': current_question['number'],
+                                'question': current_question['text'],
+                                'options': current_options.copy(),
+                                'category': current_question['category'],
+                                'correct_answer_index': 0,  # Will be set from answers
+                                'explanation': ''  # Will be set from answers
+                            })
+                        
+                        # Parse new question header
+                        # Format: **Q1.** (Category)
+                        import re
+                        match = re.match(r'\*\*Q(\d+)\.\*\*\s*\(([^)]*)\)', line)
+                        if match:
+                            question_number = int(match.group(1))
+                            category = match.group(2).strip()
+                            
+                            # Read question text (next line)
+                            i += 1
+                            if i < len(lines):
+                                question_text = lines[i].strip()
+                                current_question = {
+                                    'number': question_number,
+                                    'text': question_text,
+                                    'category': category
+                                }
+                                current_options = []
+                        
+                    # Option parsing
+                    elif in_questions_section and current_question and re.match(r'^\s*[A-Z]\.\s*', line):
+                        option_text = re.sub(r'^\s*[A-Z]\.\s*', '', line).strip()
+                        if option_text:
+                            current_options.append(option_text)
+                    
+                    # Answer parsing
+                    elif in_answers_section and line.startswith("**A"):
+                        # Format: **A1.** C. Option text
+                        import re
+                        match = re.match(r'\*\*A(\d+)\.\*\*\s*([A-Z])\.\s*(.*)', line)
+                        if match:
+                            answer_number = int(match.group(1))
+                            correct_letter = match.group(2)
+                            correct_option_text = match.group(3).strip()
+                            
+                            # Convert letter to index (A=0, B=1, etc.)
+                            correct_index = ord(correct_letter) - ord('A')
+                            answers_dict[answer_number] = correct_index
+                            
+                            # Look for explanation in next lines
+                            explanation_lines = []
+                            j = i + 1
+                            while j < len(lines):
+                                next_line = lines[j].strip()
+                                if next_line.startswith('*Explanation:*'):
+                                    j += 1
+                                    while j < len(lines) and not lines[j].strip().startswith('**A'):
+                                        explanation_lines.append(lines[j].strip())
+                                        j += 1
+                                    break
+                                elif next_line.startswith('**A'):
+                                    break
+                                j += 1
+                            
+                            if explanation_lines:
+                                explanations_dict[answer_number] = '\n'.join(explanation_lines).strip()
+                    
+                    i += 1
+                    
+                except Exception as e:
+                    print(f"Warning: Error parsing line {i}: {line[:50]}... - {str(e)}")
+                    i += 1
+                    continue
+            
+            # Save last question if exists
+            if current_question and current_options:
+                questions.append({
+                    'question_number': current_question['number'],
+                    'question': current_question['text'],
+                    'options': current_options.copy(),
+                    'category': current_question['category'],
+                    'correct_answer_index': 0,
+                    'explanation': ''
+                })
+            
+            # Apply answers and explanations
+            for question in questions:
+                q_num = question['question_number']
+                if q_num in answers_dict:
+                    question['correct_answer_index'] = answers_dict[q_num]
+                if q_num in explanations_dict:
+                    question['explanation'] = explanations_dict[q_num]
+            
+            return questions
+
+    def _detect_and_eliminate_duplicates(self, imported_questions):
+        """
+        Detect and eliminate duplicate questions based on question text similarity.
+        
+        Args:
+            imported_questions (List[dict]): List of imported questions
+            
+        Returns:
+            Tuple[List[dict], dict]: (filtered_questions, duplicate_report)
+        """
+        existing_questions = [q[0] if isinstance(q, (list, tuple)) else q.get('text', '') 
+                            for q in self.game_state.questions]
+        
+        unique_questions = []
+        duplicates_found = 0
+        total_processed = len(imported_questions)
+        
+        for question in imported_questions:
+            question_text = question.get('question', '').strip().lower()
+            
+            # Check against existing questions
+            is_duplicate = False
+            for existing_text in existing_questions:
+                if self._is_similar_question(question_text, existing_text.lower()):
+                    is_duplicate = True
+                    break
+            
+            # Check against already processed questions in this import
+            if not is_duplicate:
+                for processed_question in unique_questions:
+                    if self._is_similar_question(question_text, 
+                                               processed_question.get('question', '').strip().lower()):
+                        is_duplicate = True
+                        break
+            
+            if is_duplicate:
+                duplicates_found += 1
+            else:
+                unique_questions.append(question)
+        
+        duplicate_report = {
+            'total_processed': total_processed,
+            'duplicates_found': duplicates_found,
+            'unique_added': len(unique_questions)
+        }
+        
+        return unique_questions, duplicate_report
+
+    def _create_question_signature(self, question_text, options, category):
+        """
+        Generate normalized signature for duplicate detection.
+        
+        Uses multiple factors to create robust duplicate identification:
+        - Normalized question text (case-insensitive, whitespace-normalized)
+        - Option count and content
+        - Category matching
+        """
+        import hashlib
+        import re
+        
+        # Normalize question text
+        normalized_question = re.sub(r'\s+', ' ', question_text.lower().strip())
+        normalized_question = re.sub(r'[^\w\s]', '', normalized_question)  # Remove punctuation
+        
+        # Normalize options
+        normalized_options = []
+        for option in options:
+            normalized_option = re.sub(r'\s+', ' ', option.lower().strip())
+            normalized_option = re.sub(r'[^\w\s]', '', normalized_option)
+            normalized_options.append(normalized_option)
+        
+        # Create signature components
+        signature_components = [
+            normalized_question,
+            str(len(options)),
+            '|'.join(sorted(normalized_options)),
+            category.lower().strip()
+        ]
+        
+        # Generate hash signature
+        signature_string = '###'.join(signature_components)
+        return hashlib.md5(signature_string.encode('utf-8')).hexdigest()
+
+    def _normalize_question_dict(self, question_dict):
+        """
+        Normalize a question dictionary to standard format.
+        
+        Args:
+            question_dict (dict): Raw question dictionary
+            
+        Returns:
+            dict: Normalized question dictionary
+        """
+        # Handle different key variations
+        question_text = (
+            question_dict.get('question') or 
+            question_dict.get('text') or 
+            question_dict.get('question_text', '')
+        ).strip()
+        
+        options = question_dict.get('options', [])
+        if not isinstance(options, list):
+            options = []
+        
+        # Handle different correct answer formats
+        correct_index = 0
+        if 'correct_answer_index' in question_dict:
+            correct_index = int(question_dict['correct_answer_index'])
+        elif 'correct_answer' in question_dict:
+            # Try to convert correct_answer to index
+            correct_answer = question_dict['correct_answer']
+            if isinstance(correct_answer, str) and len(correct_answer) == 1:
+                # Convert letter to index (A=0, B=1, etc.)
+                correct_index = ord(correct_answer.upper()) - ord('A')
+            elif isinstance(correct_answer, (int, str)):
+                correct_index = int(correct_answer)
+        
+        category = question_dict.get('category', 'General').strip()
+        explanation = question_dict.get('explanation', '').strip()
+        
+        return {
+            'question': question_text,
+            'options': options,
+            'correct_answer_index': correct_index,
+            'category': category,
+            'explanation': explanation
+        }
+
+    def _is_similar_question(self, text1, text2, threshold=0.8):
+        """
+        Check if two question texts are similar enough to be considered duplicates.
+        
+        Args:
+            text1 (str): First question text
+            text2 (str): Second question text
+            threshold (float): Similarity threshold (0.0 to 1.0)
+            
+        Returns:
+            bool: True if questions are similar enough to be duplicates
+        """
+        if not text1 or not text2:
+            return False
+            
+        # Simple similarity check - can be enhanced with more sophisticated algorithms
+        # Remove common words and punctuation for comparison
+        import re
+        
+        def clean_text(text):
+            # Remove punctuation and extra spaces
+            text = re.sub(r'[^\w\s]', ' ', text.lower())
+            # Remove common words
+            common_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'what', 'which', 'how', 'when', 'where', 'why'}
+            words = [word for word in text.split() if word not in common_words and len(word) > 2]
+            return ' '.join(words)
+        
+        clean1 = clean_text(text1)
+        clean2 = clean_text(text2)
+        
+        if not clean1 or not clean2:
+            return text1.strip() == text2.strip()
+        
+        # Calculate Jaccard similarity
+        words1 = set(clean1.split())
+        words2 = set(clean2.split())
+        
+        if not words1 and not words2:
+            return True
+        
+        intersection = len(words1.intersection(words2))
+        union = len(words1.union(words2))
+        
+        if union == 0:
+            return False
+            
+        similarity = intersection / union
+        return similarity >= threshold
+
+    def _add_question_to_pool(self, question_tuple):
+        """
+        Add a question tuple to the game state question pool.
+        
+        Args:
+            question_tuple (tuple): Question in tuple format
+                                   (text, options, correct_index, category, explanation)
+            
+        Returns:
+            bool: True if question was added successfully
+        """
+        try:
+            # Validate tuple format
+            if not isinstance(question_tuple, (tuple, list)) or len(question_tuple) < 4:
+                return False
+            
+            text, options, correct_index, category = question_tuple[:4]
+            explanation = question_tuple[4] if len(question_tuple) > 4 else ""
+            
+            # Validate question data
+            if not text or not text.strip():
+                return False
+            
+            if not options or len(options) < 2:
+                return False
+            
+            if not (0 <= correct_index < len(options)):
+                return False
+            
+            if not category or not category.strip():
+                category = "General"
+            
+            # Add to game state
+            validated_tuple = (text.strip(), list(options), int(correct_index), 
+                             category.strip(), explanation.strip())
+            
+            # Add to questions list
+            self.game_state.questions.append(validated_tuple)
+            
+            # Update categories
+            self.game_state.categories.add(category.strip())
+            
+            # Update question manager if it exists
+            if hasattr(self.game_state, 'question_manager'):
+                from models.question import Question
+                question_obj = Question(text.strip(), list(options), int(correct_index), 
+                                      category.strip(), explanation.strip())
+                self.game_state.question_manager.questions.append(question_obj)
+                self.game_state.question_manager.categories.add(category.strip())
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error adding question to pool: {str(e)}")
+            return False
+    def _simulate_command(self, command):
+        """Simulate common commands with educational examples"""
+        
+        # Create sample files content
+        sample_files = {
+            'sample.txt': 'Hello Linux Plus student!\nThis is a sample text file.\nPractice your command line skills here.\nGood luck with your certification!',
+            'log.txt': 'INFO: System started\nERROR: Failed to connect\nINFO: Retrying connection\nWARNING: Low disk space\nINFO: Connection established',
+            'data.csv': 'name,age,city\nJohn,25,New York\nJane,30,Los Angeles\nBob,35,Chicago',
+            'config.conf': '[database]\nhost=localhost\nport=5432\nname=mydb\n\n[logging]\nlevel=INFO\nfile=/var/log/app.log'
+        }
+        
+        cmd_parts = command.split()
+        if not cmd_parts:
+            return None
+        
+        base_cmd = cmd_parts[0]
+        
+        # Simulate ls command
+        if base_cmd == 'ls':
+            if len(cmd_parts) == 1:
+                return 'sample.txt  log.txt  data.csv  config.conf  docs/  scripts/'
+            else:
+                return 'sample.txt  log.txt  data.csv  config.conf'
+        
+        # Simulate cat command
+        elif base_cmd == 'cat' and len(cmd_parts) > 1:
+            filename = cmd_parts[1]
+            if filename in sample_files:
+                return sample_files[filename]
+            else:
+                return f'cat: {filename}: No such file or directory'
+        
+        # Simulate grep command
+        elif base_cmd == 'grep' and len(cmd_parts) >= 3:
+            pattern = cmd_parts[1].strip('"\'')
+            filename = cmd_parts[2]
+            if filename in sample_files:
+                lines = sample_files[filename].split('\n')
+                matches = [line for line in lines if pattern.lower() in line.lower()]
+                return '\n'.join(matches) if matches else f'grep: no matches found for "{pattern}"'
+            else:
+                return f'grep: {filename}: No such file or directory'
+        
+        # Simulate wc command
+        elif base_cmd == 'wc' and len(cmd_parts) > 1:
+            filename = cmd_parts[1]
+            if filename in sample_files:
+                content = sample_files[filename]
+                lines = len(content.split('\n'))
+                words = len(content.split())
+                chars = len(content)
+                return f'{lines:8} {words:8} {chars:8} {filename}'
+            else:
+                return f'wc: {filename}: No such file or directory'
+        
+        return None  # Command not simulated, try real execution
+
+    def _get_help_text(self):
+        """Get comprehensive help text"""
+        return """Linux Plus CLI Playground - Available Commands:
+
+    FILE OPERATIONS:
+    ls                    - List files and directories
+    cat <file>           - Display file contents
+    head <file>          - Show first 10 lines of file
+    tail <file>          - Show last 10 lines of file
+
+    TEXT PROCESSING:
+    grep <pattern> <file> - Search for pattern in file
+    wc <file>            - Count lines, words, and characters
+
+    SYSTEM INFO:
+    pwd                  - Show current directory path
+    whoami              - Display current username
+    date                - Show current date and time
+
+    UTILITIES:
+    echo "text"         - Display text
+    find . -name "*.txt" - Find files by pattern
+    clear               - Clear terminal screen
+    help                - Show this help message
+
+    SAMPLE FILES AVAILABLE:
+    sample.txt          - Basic text file
+    log.txt             - Log file with different message types
+    data.csv            - CSV data file
+    config.conf         - Configuration file
+
+    EXAMPLES:
+    cat sample.txt              - View sample file
+    grep "ERROR" log.txt        - Find error messages
+    wc data.csv                 - Count lines in CSV
+    echo "Hello World"          - Print text
+    find . -name "*.txt"        - Find all .txt files
+
+    This is a safe educational environment. Not all Linux commands are available.
+    Type commands above to practice Linux command line skills!"""
+    def reset_quiz_state(self):
+        """Reset quiz state variables."""
+        self.quiz_active = False
+        self.current_quiz_mode = None
+        self.current_category_filter = None
+        self.current_question_data = None
+        self.current_question_index = -1
+        self.current_streak = 0
+        self.quick_fire_start_time = None
+        self.quick_fire_questions_answered = 0
     def setup_routes(self):
-        """Setup all FastAPI routes."""
+        """Setup Flask routes for the web interface."""
         
-        # HTML page routes
-        @self.app.get("/", response_class=HTMLResponse)
-        async def index(request: Request):
-            context = self.get_template_context(request)
-            return self.templates.TemplateResponse("index.html", context)
+        @self.app.route('/')
+        def index():
+            return render_template('index.html')
         
-        @self.app.get("/quiz", response_class=HTMLResponse)
-        async def quiz_page(request: Request):
-            context = self.get_template_context(request)
-            return self.templates.TemplateResponse("quiz.html", context)
+        @self.app.route('/quiz')
+        def quiz_page():
+            return render_template('quiz.html')
         
-        @self.app.get("/stats", response_class=HTMLResponse)
-        async def stats_page(request: Request):
-            context = self.get_template_context(request)
-            return self.templates.TemplateResponse("stats.html", context)
+        @self.app.route('/stats')
+        def stats_page():
+            return render_template('stats.html')
         
-        @self.app.get("/achievements", response_class=HTMLResponse)
-        async def achievements_page(request: Request):
-            context = self.get_template_context(request)
-            return self.templates.TemplateResponse("achievements.html", context)
+        @self.app.route('/achievements')
+        def achievements_page():
+            return render_template('achievements.html')
         
-        @self.app.get("/review", response_class=HTMLResponse)
-        async def review_page(request: Request):
-            context = self.get_template_context(request)
-            return self.templates.TemplateResponse("review.html", context)
+        @self.app.route('/review')
+        def review_page():
+            return render_template('review.html')
         
-        @self.app.get("/settings", response_class=HTMLResponse)
-        async def settings_page(request: Request):
-            context = self.get_template_context(request)
-            return self.templates.TemplateResponse("settings.html", context)
+        @self.app.route('/settings')
+        def settings_page():
+            return render_template('settings.html')
         
-        @self.app.get("/cli-playground", response_class=HTMLResponse)
-        async def cli_playground_page(request: Request):
-            context = self.get_template_context(request)
-            context.update({
-                "title": "CLI Playground",
-                "active_page": "cli_playground"
-            })
-            return self.templates.TemplateResponse("cli_playground.html", context)
-        
-        # API Status endpoint
-        @self.app.get("/api/status")
-        async def api_status():
+        @self.app.route('/api/status')
+        def api_status():
             try:
+                # Use quiz controller as single source of truth
                 status = self.quiz_controller.get_session_status()
-                return {
-                    "quiz_active": status["quiz_active"],
-                    "total_questions": len(self.game_state.questions),
-                    "categories": sorted(list(self.game_state.categories)),
-                    "session_score": status["session_score"],
-                    "session_total": status["session_total"],
-                    "current_streak": status["current_streak"],
-                    "total_points": self.game_state.achievements.get("points_earned", 0),
-                    "session_points": self.game_state.session_points,
-                    "quiz_mode": status["mode"]
-                }
+                return jsonify({
+                    'quiz_active': status['quiz_active'],
+                    'total_questions': len(self.game_state.questions),
+                    'categories': sorted(list(self.game_state.categories)),
+                    'session_score': status['session_score'],
+                    'session_total': status['session_total'],
+                    'current_streak': status['current_streak'],
+                    'total_points': self.game_state.achievements.get('points_earned', 0),
+                    'session_points': self.game_state.session_points,
+                    'quiz_mode': status['mode']
+                })
             except Exception as e:
-                return {
-                    "quiz_active": False,
-                    "total_questions": len(self.game_state.questions),
-                    "categories": sorted(list(self.game_state.categories)),
-                    "session_score": 0,
-                    "session_total": 0,
-                    "current_streak": 0,
-                    "total_points": 0,
-                    "session_points": 0,
-                    "quiz_mode": None,
-                    "error": str(e)
-                }
+                return jsonify({
+                    'quiz_active': False,
+                    'total_questions': len(self.game_state.questions),
+                    'categories': sorted(list(self.game_state.categories)),
+                    'session_score': 0,
+                    'session_total': 0,
+                    'current_streak': 0,
+                    'total_points': 0,
+                    'session_points': 0,
+                    'quiz_mode': None,
+                    'error': str(e)
+                })
+        @self.app.route('/cli-playground')
+        def cli_playground_page():
+            """CLI Playground page"""
+            return render_template('cli_playground.html', 
+                                title='CLI Playground',
+                                active_page='cli_playground')
         
-        # Review incorrect answers endpoint
-        @self.app.get("/api/review_incorrect")
-        async def api_review_incorrect():
+        @self.app.route('/api/start_quiz', methods=['POST'])
+        def api_start_quiz():
             try:
-                incorrect = self.game_state.get_incorrectly_answered()
-                return {
-                    "success": True,
-                    "questions": [q.to_dict() for q in incorrect],
-                    "count": len(incorrect)
-                }
-            except Exception as e:
-                return {"success": False, "error": str(e)}
-        
-        # Refresh data endpoint (helps with UI updates after import)
-        @self.app.post("/api/refresh")
-        async def refresh_data():
-            try:
-                # Categories are automatically managed by QuestionManager
-                # No need to manually update them
-                categories = sorted(list(self.game_state.categories))
+                data = request.get_json()
+                quiz_mode = data.get('mode', 'standard')
+                category = data.get('category')
                 
-                return {
-                    "success": True,
-                    "total_questions": len(self.game_state.questions),
-                    "categories": categories,
-                    "message": "Data refreshed successfully"
-                }
-            except Exception as e:
-                return {"success": False, "error": str(e)}
-        
-        # Quiz management endpoints
-        @self.app.post("/api/start_quiz")
-        async def api_start_quiz(quiz_request: QuizStartRequest):
-            try:
-                category_filter = None if quiz_request.category == "All Categories" else quiz_request.category
+                # Normalize category filter
+                category_filter = None if category == "All Categories" else category
                 
+                # Force end any existing session to ensure clean state
                 if self.quiz_controller.quiz_active:
                     self.quiz_controller.force_end_session()
                 
                 result = self.quiz_controller.start_quiz_session(
-                    mode=quiz_request.mode,
+                    mode=quiz_mode,
                     category_filter=category_filter
                 )
                 
+                # Store category filter in web interface for consistency
                 self.current_category_filter = category_filter
                 
-                if result.get("session_active"):
-                    return {"success": True, **result}
+                if result.get('session_active'):
+                    return jsonify({'success': True, **result})
                 else:
-                    raise HTTPException(status_code=400, detail="Failed to start quiz session")
+                    return jsonify({'success': False, 'error': 'Failed to start quiz session'})
                     
             except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
+                print(f"Error starting quiz: {e}")
+                return jsonify({'success': False, 'error': str(e)})
         
-        @self.app.get("/api/get_question")
-        async def api_get_question():
+        @self.app.route('/api/get_question')
+        def api_get_question():
             try:
                 if not self.quiz_controller.quiz_active:
-                    return {"quiz_complete": True, "error": "No active quiz session"}
+                    return jsonify({'quiz_complete': True, 'error': 'No active quiz session'})
                 
-                # First, check if there's already a current question
+                # Check for break reminder before getting question
+                if self._should_show_break_reminder():
+                    return jsonify({
+                        'break_reminder': True,
+                        'questions_since_break': self.quiz_controller.questions_since_break,
+                        'break_interval': self._get_break_interval()
+                    })
+                
+                # First, check if there's already a current question (e.g., when returning to quiz tab)
                 current_question = self.quiz_controller.get_current_question()
                 
-                if current_question is None:
-                    # Get next question if no current question
-                    current_question = self.quiz_controller.get_next_question(
-                        self.current_category_filter
-                    )
+                if current_question is not None:
+                    # Return the existing current question
+                    question_data = current_question['question_data']
+                    q_text, options, _, category, _ = question_data
+                    
+                    return jsonify({
+                        'question': q_text,
+                        'options': options,
+                        'category': category,
+                        'question_number': current_question.get('question_number', 1),
+                        'streak': current_question.get('streak', 0),
+                        'mode': self.quiz_controller.current_quiz_mode,
+                        'is_single_question': self.quiz_controller.current_quiz_mode in ['daily_challenge', 'pop_quiz'],
+                        'quiz_complete': False,
+                        'quick_fire_remaining': current_question.get('quick_fire_remaining'),
+                        'break_reminder': False,
+                        'returning_to_question': True  # Flag to indicate this is not a new question
+                    })
                 
-                if current_question is None:
-                    # No more questions - quiz complete
-                    results = self.quiz_controller.end_session()
-                    return {
-                        "quiz_complete": True,
-                        "success": True,
-                        "results": results
-                    }
+                # No current question, so get the next one
+                result = self.quiz_controller.get_next_question(self.quiz_controller.category_filter)
                 
-                # Format question for response
-                question_data = current_question['question_data']
-                q_text, options, _, category, _ = question_data
+                if result is None:
+                    return jsonify({'quiz_complete': True})
                 
-                return {
-                    "question": q_text,
-                    "options": options,
-                    "category": category,
-                    "question_number": current_question.get('question_number', 1),
-                    "streak": current_question.get('streak', 0),
-                    "mode": self.quiz_controller.current_quiz_mode,
-                    "is_single_question": self.quiz_controller.current_quiz_mode in ['daily_challenge', 'pop_quiz'],
-                    "quiz_complete": False,
-                    "quick_fire_remaining": current_question.get('quick_fire_remaining'),
-                    "success": True
-                }
+                # Store current question info (this is cached automatically by get_next_question)
+                self.current_question_data = result['question_data']
+                self.current_question_index = result['original_index']
                 
-            except HTTPException:
-                raise
+                # Format response for web interface
+                q_text, options, _, category, _ = result['question_data']
+                
+                return jsonify({
+                    'question': q_text,
+                    'options': options,
+                    'category': category,
+                    'question_number': result.get('question_number', 1),
+                    'streak': result.get('streak', 0),
+                    'mode': self.quiz_controller.current_quiz_mode,
+                    'is_single_question': self.quiz_controller.current_quiz_mode in ['daily_challenge', 'pop_quiz'],
+                    'quiz_complete': False,
+                    'quick_fire_remaining': result.get('quick_fire_remaining'),
+                    'break_reminder': False,
+                    'returning_to_question': False  # Flag to indicate this is a new question
+                })
+                
             except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Error getting question: {str(e)}")
-        
-        @self.app.post("/api/submit_answer")
-        async def api_submit_answer(answer_request: AnswerSubmissionRequest):
+                print(f"Error in get_question: {e}")
+                return jsonify({'error': str(e), 'quiz_complete': True})
+        @self.app.route('/api/acknowledge_break', methods=['POST'])
+        def api_acknowledge_break():
+            """Reset break counter when user acknowledges break reminder."""
             try:
-                if not self.quiz_controller.quiz_active:
-                    raise HTTPException(status_code=400, detail="No active quiz session")
+                self.quiz_controller.reset_break_counter()
+                return jsonify({'success': True})
+            except Exception as e:
+                print(f"Error acknowledging break: {e}")
+                return jsonify({'success': False, 'error': str(e)})
+
+        @self.app.route('/api/submit_answer', methods=['POST'])
+        def api_submit_answer():
+            try:
+                data = request.get_json()
+                user_answer_index = data.get('answer_index')
                 
-                # Get current question from controller (like the Flask version)
+                # Validate session and question state
+                if not self.quiz_controller.quiz_active:
+                    return jsonify({'error': 'No active quiz session'})
+                
+                # Get current question from controller
                 current_question = self.quiz_controller.get_current_question()
                 if current_question is None:
-                    raise HTTPException(status_code=400, detail="No current question available")
+                    return jsonify({'error': 'No current question available'})
                 
                 question_data = current_question['question_data']
                 question_index = current_question['original_index']
                 
-                # Submit answer using the same method as Flask version
                 result = self.quiz_controller.submit_answer(
                     question_data, 
-                    answer_request.answer_index, 
+                    user_answer_index, 
                     question_index
                 )
                 
                 # Clear current question cache after processing
                 self.quiz_controller.clear_current_question_cache()
                 
-                return result
+                return jsonify(result)
                 
-            except HTTPException:
-                raise
             except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
+                print(f"Error in submit_answer: {e}")
+                return jsonify({'error': str(e)})
         
-        @self.app.post("/api/end_quiz")
-        async def api_end_quiz():
+        @self.app.route('/api/end_quiz', methods=['POST'])
+        def api_end_quiz():
             try:
                 if not self.quiz_controller.quiz_active:
-                    return {"success": True, "message": "No active quiz session"}
+                    return jsonify({'success': True, 'message': 'No active quiz session'})
                 
-                # Use the proper end_session method instead of force_end_session
-                result = self.quiz_controller.end_session()
+                result = self.quiz_controller.force_end_session()
                 
-                if 'error' in result:
-                    return {"success": False, "error": result['error']}
-                
-                return {"success": True, "results": result}
+                return jsonify({'success': True, **result})
                 
             except Exception as e:
-                print(f"❌ Error ending quiz: {e}")
-                import traceback
-                traceback.print_exc()
-                raise HTTPException(status_code=500, detail=str(e))
+                print(f"Error in end_quiz: {e}")
+                return jsonify({'success': False, 'error': str(e)})
         
-        # Quick fire and special modes
-        @self.app.post("/api/start_quick_fire")
-        async def api_start_quick_fire():
+        @self.app.route('/api/quick_fire_status')
+        def api_quick_fire_status():
+            try:
+                if self.quiz_controller.quick_fire_active:
+                    result = self.quiz_controller.check_quick_fire_status()
+                    return jsonify(result)
+                else:
+                    return jsonify({'active': False})
+            except Exception as e:
+                return jsonify({'active': False, 'error': str(e)})
+        
+        # Special mode starters - simplified
+        @self.app.route('/api/start_quick_fire', methods=['POST'])
+        def api_start_quick_fire():
             try:
                 if self.quiz_controller.quiz_active:
                     self.quiz_controller.force_end_session()
                 
                 result = self.quiz_controller.start_quiz_session(mode="quick_fire")
-                return {"success": True, **result}
+                self.current_quiz_mode = "quick_fire"
+                self.current_category_filter = None
+                
+                return jsonify({'success': True, **result})
             except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
-        
-        @self.app.post("/api/start_daily_challenge")
-        async def api_start_daily_challenge():
+                return jsonify({'success': False, 'error': str(e)})
+
+        @self.app.route('/api/start_daily_challenge', methods=['POST'])
+        def api_start_daily_challenge():
             try:
                 if self.quiz_controller.quiz_active:
                     self.quiz_controller.force_end_session()
                 
                 result = self.quiz_controller.start_quiz_session(mode="daily_challenge")
-                return {"success": True, **result}
+                self.current_quiz_mode = "daily_challenge"
+                self.current_category_filter = None
+                
+                return jsonify({'success': True, **result})
             except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
-        
-        @self.app.post("/api/start_pop_quiz")
-        async def api_start_pop_quiz():
+                return jsonify({'success': False, 'error': str(e)})
+
+        @self.app.route('/api/start_pop_quiz', methods=['POST'])
+        def api_start_pop_quiz():
             try:
                 if self.quiz_controller.quiz_active:
                     self.quiz_controller.force_end_session()
                 
                 result = self.quiz_controller.start_quiz_session(mode="pop_quiz")
-                return {"success": True, **result}
+                self.current_quiz_mode = "pop_quiz"
+                self.current_category_filter = None
+                
+                return jsonify({'success': True, **result})
             except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
-        
-        @self.app.post("/api/start_mini_quiz")
-        async def api_start_mini_quiz():
+                return jsonify({'success': False, 'error': str(e)})
+
+        @self.app.route('/api/start_mini_quiz', methods=['POST'])
+        def api_start_mini_quiz():
             try:
                 if self.quiz_controller.quiz_active:
                     self.quiz_controller.force_end_session()
                 
                 result = self.quiz_controller.start_quiz_session(mode="mini_quiz")
-                return {"success": True, **result}
+                self.current_quiz_mode = "mini_quiz"
+                self.current_category_filter = None
+                
+                return jsonify({'success': True, **result})
             except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
+                return jsonify({'success': False, 'error': str(e)})
         
-        @self.app.get("/api/quick_fire_status")
-        async def api_quick_fire_status():
+        # Other API routes remain the same...
+        @self.app.route('/api/statistics')
+        def api_statistics():
             try:
-                if self.quiz_controller.quick_fire_active:
-                    result = self.quiz_controller.check_quick_fire_status()
-                    return result
-                else:
-                    return {"active": False}
+                return jsonify(self.stats_controller.get_detailed_statistics())
             except Exception as e:
-                return {"active": False, "error": str(e)}
+                return jsonify({'error': str(e)})
         
-        # Statistics and achievements
-        @self.app.get("/api/statistics")
-        async def api_statistics():
+        @self.app.route('/api/achievements')
+        def api_achievements():
             try:
-                return self.stats_controller.get_detailed_statistics()
+                return jsonify(self.stats_controller.get_achievements_data())
             except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
+                return jsonify({'error': str(e)})
         
-        @self.app.get("/api/achievements")
-        async def api_achievements():
+        @self.app.route('/api/leaderboard')
+        def api_leaderboard():
             try:
-                return self.stats_controller.get_achievements_data()
+                return jsonify(self.stats_controller.get_leaderboard_data())
             except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
+                return jsonify({'error': str(e)})
         
-        @self.app.get("/api/leaderboard")
-        async def api_leaderboard():
-            try:
-                return self.stats_controller.get_leaderboard_data()
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
-        
-        @self.app.post("/api/clear_statistics")
-        async def api_clear_statistics():
+        @self.app.route('/api/clear_statistics', methods=['POST'])
+        def api_clear_statistics():
             try:
                 success = self.stats_controller.clear_statistics()
-                return {"success": success}
+                return jsonify({'success': success})
             except Exception as e:
-                return {"success": False, "error": str(e)}
+                return jsonify({'success': False, 'error': str(e)})
         
-        # CLI Playground endpoints
-        @self.app.post("/api/cli/execute")
-        async def api_cli_execute(command_request: CLICommandRequest):
+        @self.app.route('/api/review_incorrect')
+        def api_review_incorrect():
             try:
-                result = await self.execute_cli_command_async(command_request.command)
-                return {"output": result, "success": True}
+                return jsonify(self.stats_controller.get_review_questions_data())
             except Exception as e:
-                return {"output": f"Error: {str(e)}", "success": False}
-        
-        @self.app.get("/api/cli/help")
-        async def api_cli_help():
+                return jsonify({'error': str(e)})
+
+        @self.app.route('/api/remove_from_review', methods=['POST'])
+        def api_remove_from_review():
             try:
-                help_text = self.get_cli_help_text()
-                return {"help": help_text, "success": True}
-            except Exception as e:
-                return {"help": "Help not available", "success": False, "error": str(e)}
-        
-        # CLI Playground endpoints with session management
-        @self.app.post("/api/cli/execute")
-        async def api_cli_execute(command_request: CLICommandRequest):
-            try:
-                result = await self.execute_cli_command_async(command_request.command)
+                data = request.get_json()
+                question_text = data.get('question_text')
+                if not question_text:
+                    return jsonify({'success': False, 'error': 'No question text provided'})
                 
-                # Store command in history
-                await self._add_to_cli_history(command_request.command)
+                success = self.stats_controller.remove_from_review_list(question_text)
+                return jsonify({'success': success})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
+
+        @self.app.route('/api/export_history')
+        def api_export_history():
+            try:
+                from flask import make_response
                 
-                return {"output": result, "success": True}
-            except Exception as e:
-                return {"output": f"Error: {str(e)}", "success": False}
-        
-        @self.app.get("/api/cli/help")
-        async def api_cli_help():
-            try:
-                help_text = self.get_cli_help_text()
-                return {"help": help_text, "success": True}
-            except Exception as e:
-                return {"help": "Help not available", "success": False, "error": str(e)}
-        
-        @self.app.get("/api/cli/commands")
-        async def api_cli_commands():
-            try:
-                # Return commands in the format expected by the JavaScript
-                commands_list = []
-                for cmd_name in self.cli_playground.safe_commands.keys():
-                    commands_list.append({
-                        "command": cmd_name,
-                        "description": f"Execute {cmd_name} command"
-                    })
-                return {"commands": commands_list, "success": True}
-            except Exception as e:
-                return {"commands": [], "success": False, "error": str(e)}
-        
-        @self.app.post("/api/cli/clear")
-        async def api_cli_clear():
-            try:
-                # Clear command history
-                await self._clear_cli_history()
-                return {"success": True, "message": "History cleared"}
-            except Exception as e:
-                return {"success": False, "error": str(e)}
-        
-        @self.app.get("/api/cli/history")
-        async def api_cli_history():
-            try:
-                history = await self._get_cli_history()
-                return {"history": history, "success": True}
-            except Exception as e:
-                return {"history": [], "success": False, "error": str(e)}
-        
-        # Settings endpoints
-        @self.app.post("/api/save_settings")
-        async def api_save_settings(settings_request: SettingsRequest):
-            try:
-                settings = {
-                    "focusMode": settings_request.focusMode,
-                    "breakReminder": settings_request.breakReminder,
-                    "timestamp": time.time()
+                export_data = self.game_state.study_history.copy()
+                export_data["export_metadata"] = {
+                    "export_date": datetime.now().isoformat(),
+                    "total_questions_in_pool": len(self.game_state.questions),
+                    "categories_available": list(self.game_state.categories)
                 }
                 
-                async with asyncio.Lock():
-                    with open("web_settings.json", "w") as f:
-                        json.dump(settings, f)
+                response = make_response(json.dumps(export_data, indent=2))
+                response.headers['Content-Type'] = 'application/json'
+                response.headers['Content-Disposition'] = f'attachment; filename=linux_plus_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
                 
-                return {"success": True}
+                return response
             except Exception as e:
-                return {"success": False, "error": str(e)}
+                return jsonify({'error': str(e)}), 500
         
-        @self.app.get("/api/load_settings")
-        async def api_load_settings():
+        @self.app.errorhandler(404)
+        def not_found_error(error):
+            return render_template('error.html', error="Page not found"), 404
+
+        @self.app.errorhandler(500)
+        def internal_error(error):
+            return render_template('error.html', error="Internal server error"), 500
+        
+        @self.app.route('/api/save_settings', methods=['POST'])
+        def api_save_settings():
             try:
-                try:
-                    with open("web_settings.json", "r") as f:
-                        settings = json.load(f)
-                    return {"success": True, "settings": settings}
-                except FileNotFoundError:
-                    return {"success": True, "settings": {"focusMode": False, "breakReminder": 10}}
+                data = request.get_json()
+                settings = {
+                    'focusMode': data.get('focusMode', False),
+                    'breakReminder': data.get('breakReminder', 10),
+                    'timestamp': time.time()
+                }
+                
+                # Save to a simple file (you could also use the game_state)
+                import json
+                with open('web_settings.json', 'w') as f:
+                    json.dump(settings, f)
+                
+                return jsonify({'success': True})
             except Exception as e:
-                return {"success": False, "error": str(e)}
-        
-        # Question count endpoint with category refresh
-        @self.app.get("/api/question-count")
-        async def get_question_count():
+                return jsonify({'success': False, 'error': str(e)})
+
+        @self.app.route('/api/load_settings')
+        def api_load_settings():
+            try:
+                import json
+                try:
+                    with open('web_settings.json', 'r') as f:
+                        settings = json.load(f)
+                    return jsonify({'success': True, 'settings': settings})
+                except FileNotFoundError:
+                    # Return defaults
+                    return jsonify({'success': True, 'settings': {'focusMode': False, 'breakReminder': 10}})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
+        # Add these routes in the setup_routes method after the existing routes
+
+        @self.app.route('/api/set_fullscreen', methods=['POST'])
+        def api_set_fullscreen():
+            try:
+                data = request.get_json()
+                enable = data.get('enable', True)
+                result = self.toggle_fullscreen(enable)
+                return jsonify(result)
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
+
+        @self.app.route('/api/get_fullscreen_status')
+        def api_get_fullscreen_status():
+            try:
+                result = self.is_fullscreen()
+                return jsonify(result)
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
+        @self.app.route('/api/question-count')
+        def get_question_count():
+            """Get the current number of questions available."""
             try:
                 count = len(self.game_state.questions)
-                categories = sorted(list(self.game_state.categories))
-                
-                return {
-                    "success": True, 
-                    "count": count,
-                    "categories": categories
-                }
+                return jsonify({
+                    'success': True,
+                    'count': count
+                })
             except Exception as e:
-                return {"success": False, "error": str(e)}
-        
-        # Category cleanup endpoint
-        @self.app.post("/api/cleanup_categories")
-        async def cleanup_categories():
+                return jsonify({
+                    'success': False,
+                    'error': str(e)
+                }), 500
+        self.setup_export_import_routes()
+    def handle_api_errors(f):
+        def wrapper(*args, **kwargs):
             try:
-                print("🧹 Starting category cleanup...")
-                
-                # The QuestionManager handles categories automatically
-                # We can't directly modify categories since it's a read-only property
-                # But we can normalize questions and let the QuestionManager update categories
-                
-                updated_count = 0
-                questions = self.game_state.question_manager.questions
-                
-                for i, question in enumerate(questions):
-                    old_category = question.category
-                    new_category = self._normalize_category_name(old_category)
-                    
-                    if old_category != new_category:
-                        # Update the question object directly
-                        question.category = new_category
-                        updated_count += 1
-                        print(f"🔄 Updated category: '{old_category}' → '{new_category}'")
-                
-                # Save changes
-                try:
-                    await self._save_questions_to_file()
-                    print("✅ Categories cleaned up and saved")
-                except Exception as save_error:
-                    print(f"⚠️ Cleanup successful but save failed: {save_error}")
-                
-                # Get updated categories from QuestionManager
-                categories = sorted(list(self.game_state.categories))
-                
-                return {
-                    "success": True,
-                    "message": f"Cleaned up {updated_count} categories",
-                    "total_categories": len(categories),
-                    "categories": categories
-                }
-                
+                return f(*args, **kwargs)
             except Exception as e:
-                print(f"❌ Category cleanup failed: {e}")
-                return {"success": False, "error": str(e)}
-        
-        # Debug endpoint to help troubleshoot issues
-        @self.app.get("/api/debug/game_state")
-        async def debug_game_state():
-            try:
-                debug_info = {
-                    "questions_count": len(self.game_state.questions) if hasattr(self.game_state, 'questions') else 0,
-                    "questions_type": str(type(self.game_state.questions)) if hasattr(self.game_state, 'questions') else "Not found",
-                    "has_categories": hasattr(self.game_state, 'categories'),
-                    "categories_count": len(self.game_state.categories) if hasattr(self.game_state, 'categories') else 0,
-                    "has_save_questions": hasattr(self.game_state, 'save_questions'),
-                    "game_state_attributes": [attr for attr in dir(self.game_state) if not attr.startswith('_')],
-                }
-                
-                # Sample question format if questions exist
-                if hasattr(self.game_state, 'questions') and self.game_state.questions:
-                    first_question = self.game_state.questions[0]
-                    debug_info["sample_question_type"] = str(type(first_question))
-                    debug_info["sample_question_format"] = str(first_question)[:200] if first_question else "None"
-                
-                return {"success": True, "debug_info": debug_info}
-            except Exception as e:
-                return {"success": False, "error": str(e)}
-        
-        @self.app.post("/api/debug/preview_file")
-        async def debug_preview_file(file: UploadFile = File(...)):
-            """Preview first 50 lines of uploaded file for debugging."""
-            try:
-                content = await file.read()
-                file_content = content.decode('utf-8')
-                lines = file_content.split('\n')
-                
-                preview = {
-                    "filename": file.filename,
-                    "total_lines": len(lines),
-                    "file_size": len(content),
-                    "first_50_lines": lines[:50],
-                    "sample_question_lines": [],
-                    "sample_answer_lines": []
-                }
-                
-                # Find sample question and answer lines
-                for i, line in enumerate(lines[:200]):  # Check first 200 lines
-                    if re.match(r'\*\*Q\d+\.\*\*', line):
-                        preview["sample_question_lines"].append(f"Line {i+1}: {line}")
-                    elif re.match(r'\*\*A\d+\.\*\*', line):
-                        preview["sample_answer_lines"].append(f"Line {i+1}: {line}")
-                
-                return {"success": True, "preview": preview}
-            except Exception as e:
-                return {"success": False, "error": str(e)}
-        
-        @self.app.get("/api/debug/questions")
-        async def debug_questions():
-            """Debug endpoint to inspect current questions in memory."""
-            try:
-                if not hasattr(self.game_state, 'questions'):
-                    return {"success": False, "error": "No questions attribute found"}
-                
-                questions = self.game_state.questions
-                debug_info = {
-                    "total_questions": len(questions),
-                    "questions_type": str(type(questions)),
-                    "sample_questions": []
-                }
-                
-                # Show first 5 questions for inspection
-                for i, question in enumerate(questions[:5]):
-                    question_info = {
-                        "index": i,
-                        "type": str(type(question)),
-                        "length": len(question) if hasattr(question, '__len__') else "N/A"
-                    }
-                    
-                    if isinstance(question, tuple):
-                        question_info["tuple_content"] = {
-                            "question_text": question[0] if len(question) > 0 else "Missing",
-                            "options_count": len(question[1]) if len(question) > 1 and isinstance(question[1], list) else "Not list",
-                            "correct_answer": question[2] if len(question) > 2 else "Missing",
-                            "category": question[3] if len(question) > 3 else "Missing",
-                            "difficulty": question[4] if len(question) > 4 else "Missing"
-                        }
-                    elif hasattr(question, '__dict__'):
-                        question_info["object_attributes"] = list(vars(question).keys())
-                    else:
-                        question_info["raw_content"] = str(question)[:200]
-                    
-                    debug_info["sample_questions"].append(question_info)
-                
-                return {"success": True, "debug_info": debug_info}
-                
-            except Exception as e:
-                import traceback
-                return {"success": False, "error": str(e), "traceback": traceback.format_exc()}
-        
-        # Import/Export endpoints
-        @self.app.get("/import/questions", response_class=HTMLResponse)
-        async def import_questions_page(request: Request):
-            context = self.get_template_context(request)
-            return self.templates.TemplateResponse("import.html", context)
-        
-        @self.app.post("/import/questions")
-        async def import_questions_post(file: UploadFile = File(...)):
-            try:
-                print(f"📁 Import started for file: {file.filename}")
-                
-                # File validation
-                if not file.filename:
-                    raise HTTPException(status_code=400, detail="No file was selected.")
-                
-                # Check file extension
-                file_ext = file.filename.lower().split('.')[-1] if '.' in file.filename else ''
-                print(f"📄 File extension: {file_ext}")
-                
-                if file_ext not in ['json', 'md']:
-                    raise HTTPException(
-                        status_code=400, 
-                        detail="Only JSON and Markdown (.md) files are supported."
-                    )
-                
-                # Read file content
-                content = await file.read()
-                print(f"📊 File size: {len(content)} bytes")
-                
-                # Check file size (10MB limit)
-                if len(content) > 10 * 1024 * 1024:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="File size too large. Maximum size is 10MB."
-                    )
-                
-                # Decode content
-                try:
-                    file_content = content.decode('utf-8')
-                    print(f"✅ File decoded successfully, length: {len(file_content)}")
-                except UnicodeDecodeError as e:
-                    print(f"❌ Unicode decode error: {e}")
-                    raise HTTPException(
-                        status_code=400,
-                        detail="File encoding error. Please ensure the file is UTF-8 encoded."
-                    )
-                
-                # Parse questions based on file type
-                print(f"🔍 Parsing {file_ext} file...")
-                try:
-                    if file_ext == 'json':
-                        imported_questions = self._parse_json_questions(file_content)
-                    elif file_ext == 'md':
-                        imported_questions = self._parse_markdown_questions(file_content)
-                    else:
-                        imported_questions = []
-                    
-                    print(f"📝 Parsed {len(imported_questions)} questions")
-                except Exception as parse_error:
-                    print(f"❌ Parse error: {parse_error}")
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Failed to parse file: {str(parse_error)}"
-                    )
-                
-                if not imported_questions:
-                    return {"success": False, "message": "No valid questions found in the uploaded file."}
-                
-                # Add questions to system
-                print(f"💾 Adding questions to system...")
-                total_added = 0
-                errors = []
-                
-                # Get current questions count
-                initial_count = len(self.game_state.questions) if hasattr(self.game_state, 'questions') else 0
-                print(f"📊 Initial question count: {initial_count}")
-                
-                for i, question_data in enumerate(imported_questions):
-                    try:
-                        # Safe debug logging with type checking
-                        question_text = question_data.get('question', '') if isinstance(question_data, dict) else str(question_data)
-                        if isinstance(question_text, str):
-                            debug_text = question_text[:50] + "..." if len(question_text) > 50 else question_text
-                        else:
-                            debug_text = f"Invalid question type: {type(question_text)}"
-                        
-                        print(f"🔄 Processing question {i+1}: {debug_text}")
-                        
-                        # Validate question_data is a dictionary
-                        if not isinstance(question_data, dict):
-                            errors.append(f"Question {i+1}: Invalid data format - got {type(question_data)}: {str(question_data)[:100]}")
-                            continue
-                        
-                        # Validate question structure
-                        question_text = question_data.get('question', '')
-                        if not isinstance(question_text, str) or not question_text.strip():
-                            errors.append(f"Question {i+1}: Empty or invalid question text")
-                            continue
-                        
-                        options = question_data.get('options', [])
-                        if not isinstance(options, list) or len(options) < 2:
-                            errors.append(f"Question {i+1}: Invalid or insufficient options")
-                            continue
-                        
-                        # Validate correct answer index
-                        correct_idx = question_data.get('correct_answer_index', 0)
-                        if not isinstance(correct_idx, int) or correct_idx < 0 or correct_idx >= len(options):
-                            errors.append(f"Question {i+1}: Invalid correct answer index")
-                            continue
-                        
-                        # Create Question object and add via QuestionManager
-                        try:
-                            from models.question import Question
-                            
-                            question_obj = Question(
-                                text=question_text.strip(),
-                                options=options,
-                                correct_index=correct_idx,
-                                category=self._normalize_category_name(question_data.get('category', 'General')),
-                                explanation=question_data.get('explanation', '')
-                            )
-                            
-                            # Add question via QuestionManager (this is the correct way)
-                            question_index = self.game_state.question_manager.add_question(question_obj)
-                            
-                            # Debug: Verify the question was added
-                            current_count = len(self.game_state.questions)
-                            print(f"📝 Question {i+1} added via QuestionManager. Total count now: {current_count}")
-                            print(f"    Question: {question_text[:50]}...")
-                            print(f"    Options: {len(options)} items")
-                            print(f"    Category: {question_obj.category}")
-                            print(f"    Added at index: {question_index}")
-                            
-                            total_added += 1
-                            
-                        except Exception as add_error:
-                            error_msg = f"Question {i+1}: Error adding to QuestionManager - {str(add_error)}"
-                            print(f"❌ {error_msg}")
-                            errors.append(error_msg)
-                            continue
-                        
-                    except Exception as e:
-                        error_msg = f"Question {i+1}: Error processing - {str(e)}"
-                        print(f"❌ {error_msg}")
-                        errors.append(error_msg)
-                        continue
-                
-                # Report results
-                final_count = len(self.game_state.questions) if hasattr(self.game_state, 'questions') else 0
-                print(f"📊 Final question count: {final_count}")
-                print(f"➕ Questions added: {total_added}")
-                
-                # Try to save (but don't fail if save doesn't work)
-                try:
-                    print("💾 Attempting to save questions...")
-                    await self._save_questions_to_file()
-                    print("✅ Questions saved successfully")
-                except Exception as save_error:
-                    error_msg = f"Warning: Could not save questions: {str(save_error)}"
-                    print(f"⚠️ {error_msg}")
-                    errors.append(error_msg)
-                
-                response_message = f'Successfully imported {total_added} questions from {file.filename}.'
-                if errors:
-                    response_message += f' {len(errors)} issues encountered.'
-                
-                print(f"🎉 Import completed: {response_message}")
-                
-                return {
-                    "success": True,
-                    "message": response_message,
-                    "total_added": total_added,
-                    "errors": errors[:10] if errors else [],  # Limit errors shown
-                    "debug_info": {
-                        "initial_count": initial_count,
-                        "final_count": final_count,
-                        "parsed_questions": len(imported_questions)
-                    }
-                }
-                
-            except HTTPException:
-                raise
-            except Exception as e:
-                error_msg = f"Import failed: {str(e)}"
-                print(f"💥 {error_msg}")
-                import traceback
-                traceback.print_exc()
-                raise HTTPException(status_code=500, detail=error_msg)
-        
-        # Break reminder endpoints
-        @self.app.post("/api/acknowledge_break")
-        async def api_acknowledge_break():
-            try:
-                # Reset break counter (if this method exists)
-                if hasattr(self.quiz_controller, 'reset_break_counter'):
-                    self.quiz_controller.reset_break_counter()
-                return {"success": True}
-            except Exception as e:
-                return {"success": False, "error": str(e)}
-    
-    async def execute_cli_command_async(self, command: str) -> str:
-        """Execute CLI command asynchronously."""
+                logging.error(f"API Error in {f.__name__}: {str(e)}")
+                logging.error(traceback.format_exc())
+                return jsonify({
+                    'error': f'Server error: {str(e)}',
+                    'success': False
+                }), 500
+        wrapper.__name__ = f.__name__
+        return wrapper
+    def _get_help_text(self):
+        """Get help text for CLI playground commands."""
+        help_func = cli_playground.safe_commands.get('help', lambda args: "No help available")
+        return help_func([])  # Pass empty args list
+
+    def _simulate_command(self, command):
+        """Simulate command execution using the CLI playground."""
         try:
-            # Run CLI command in thread pool to avoid blocking
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, self.cli_playground.process_command, command)
-            return result
+            return cli_playground.process_command(command)
         except Exception as e:
             return f"Error executing command: {str(e)}"
     
-    def get_cli_help_text(self) -> str:
-        """Get CLI help text."""
-        help_func = self.cli_playground.safe_commands.get("help", lambda args: "No help available")
-        return help_func([])
+    def run_flask_app(self):
+        """Run the Flask app in a separate thread."""
+        self.app.run(host='127.0.0.1', port=5000, debug=False, use_reloader=False)
     
-    # CLI History management (simple in-memory storage for now)
-    cli_history = []
-    
-    async def _add_to_cli_history(self, command: str):
-        """Add command to CLI history."""
-        if command.strip() and command not in self.cli_history[-5:]:  # Avoid duplicates in recent history
-            self.cli_history.append(command)
-            # Keep only last 50 commands
-            if len(self.cli_history) > 50:
-                self.cli_history = self.cli_history[-50:]
-    
-    async def _get_cli_history(self) -> List[str]:
-        """Get CLI command history."""
-        return self.cli_history[-20:]  # Return last 20 commands
-    
-    async def _clear_cli_history(self):
-        """Clear CLI command history."""
-        self.cli_history.clear()
-    
-    async def _save_questions_to_file(self):
-        """Save current questions to the JSON file using QuestionManager."""
-        try:
-            questions_data = []
-            
-            # Use QuestionManager's questions directly
-            questions = self.game_state.question_manager.questions
-            print(f"💾 Saving {len(questions)} questions to file...")
-            
-            for i, question in enumerate(questions):
-                try:
-                    # Convert Question object to dict
-                    question_dict = {
-                        "question_text": question.text,
-                        "options": question.options,
-                        "correct_answer": question.correct_index,
-                        "category": question.category,
-                        "difficulty": getattr(question, 'difficulty', 'Intermediate'),
-                        "explanation": getattr(question, 'explanation', '')
-                    }
-                    questions_data.append(question_dict)
-                        
-                except Exception as e:
-                    print(f"❌ Error processing question {i+1} for save: {e}")
-                    continue
-            
-            print(f"📝 Prepared {len(questions_data)} questions for saving")
-            
-            # Write to file
-            questions_file = Path('data/questions.json')
-            questions_file.parent.mkdir(exist_ok=True)
-            
-            with open(questions_file, 'w', encoding='utf-8') as f:
-                json.dump(questions_data, f, indent=2, ensure_ascii=False)
-            
-            print(f"💾 Successfully saved {len(questions_data)} questions to {questions_file}")
-            
-            # Verify the save worked
-            try:
-                with open(questions_file, 'r', encoding='utf-8') as f:
-                    saved_data = json.load(f)
-                print(f"✅ Verification: File contains {len(saved_data)} questions")
-                
-                # Verify categories are preserved
-                saved_categories = set(q.get('category', 'General') for q in saved_data)
-                print(f"✅ Verification: {len(saved_categories)} categories preserved")
-                
-            except Exception as verify_error:
-                print(f"⚠️ Could not verify save: {verify_error}")
-            
-        except Exception as e:
-            print(f"❌ Error saving questions: {e}")
-            import traceback
-            traceback.print_exc()
-            raise
-    
-    def get_template_context(self, request: Request) -> Dict[str, Any]:
-        """Get template context with FastAPI-compatible url_for function."""
-        def url_for(name: str, **params) -> str:
-            """FastAPI-compatible url_for function."""
-            if name == "static":
-                filename = params.get("filename", "")
-                return f"/static/{filename}"
-            # For other routes, use Starlette's url_path_for
-            try:
-                return str(request.url_for(name, **params))
-            except:
-                # Fallback for static files or unknown routes
-                return f"/{name}"
+    def start(self):
+        """Start the web interface in a desktop window."""
+        # Start Flask in a separate thread
+        flask_thread = threading.Thread(target=self.run_flask_app, daemon=True)
+        flask_thread.start()
         
-        return {
-            "request": request,
-            "url_for": url_for
-        }
-    
-    def _normalize_category_name(self, category: str) -> str:
-        """Normalize category name to avoid duplicates."""
-        if not category:
-            return "General"
+        # Wait a moment for Flask to start
+        time.sleep(1)
         
-        # Clean up the category name
-        category = category.strip()
+        # Create the desktop window
+        window = webview.create_window(
+            title='Linux+ Study Game',
+            url='http://127.0.0.1:5000',
+            width=1200,
+            height=900,
+            min_size=(800, 600),
+            resizable=True
+        )
         
-        # Fix common formatting issues
-        if category.endswith("(") or category.endswith(" ("):
-            category = category.rstrip("( ")
+        # Store window reference for fullscreen control
+        self.window = window
         
-        # Ensure parentheses are balanced
-        open_parens = category.count("(")
-        close_parens = category.count(")")
-        
-        if open_parens > close_parens:
-            category += ")" * (open_parens - close_parens)
-        
-        return category
+        # Start the webview (this blocks until window is closed)
+        webview.start(debug=self.debug)
     
-    def _parse_json_questions(self, file_content: str) -> List[Dict]:
-        """Parse questions from JSON format."""
-        try:
-            data = json.loads(file_content)
-            questions = []
-            
-            # Handle different JSON structures
-            if isinstance(data, list):
-                # Direct list of questions
-                for item in data:
-                    if isinstance(item, dict) and 'question' in item:
-                        questions.append(item)
-            elif isinstance(data, dict):
-                # Check for questions key
-                if 'questions' in data:
-                    questions = data['questions']
-                elif 'question' in data:
-                    # Single question
-                    questions = [data]
-            
-            # Normalize question format
-            normalized = []
-            for q in questions:
-                if isinstance(q, dict):
-                    normalized_q = {
-                        'question': q.get('question_text', q.get('question', '')),
-                        'options': q.get('options', []),
-                        'correct_answer_index': q.get('correct_answer_index', q.get('correct_answer', 0)),
-                        'category': self._normalize_category_name(q.get('category', 'General')),
-                        'explanation': q.get('explanation', ''),
-                        'difficulty': q.get('difficulty', 'Intermediate')
-                    }
-                    if normalized_q['question'] and normalized_q['options']:
-                        normalized.append(normalized_q)
-            
-            return normalized
-            
-        except json.JSONDecodeError:
-            return []
-        except Exception:
-            return []
-    
-    def _parse_markdown_questions(self, file_content: str) -> List[Dict]:
-        """Parse questions from Markdown format with improved parsing."""
-        try:
-            questions = []
-            lines = file_content.split('\n')
-            
-            current_question = None
-            current_options = []
-            current_category = 'General'
-            in_questions_section = False
-            in_answers_section = False
-            answers_map = {}  # Map question numbers to correct answers
-            
-            print(f"🔍 Markdown parser: Processing {len(lines)} lines")
-            
-            for line_num, line in enumerate(lines):
-                line = line.strip()
-                
-                # Skip empty lines
-                if not line:
-                    continue
-                
-                # Section headers
-                if line.lower().startswith('# questions'):
-                    in_questions_section = True
-                    in_answers_section = False
-                    print("📝 Found Questions section")
-                    continue
-                elif line.lower().startswith('# answers'):
-                    in_questions_section = False
-                    in_answers_section = True
-                    print("📝 Found Answers section")
-                    continue
-                elif line.startswith('---') or line.startswith('==='):
-                    continue
-                
-                if in_questions_section:
-                    # Question pattern: **Q1.** (Category) Question text
-                    # Also handle: **Q1.** Question text without category
-                    # Updated regex to capture more patterns
-                    q_match = re.match(r'\*\*Q(\d+)\.\*\*\s*(?:\(([^)]+)\))?\s*(.*)', line)
-                    if q_match:
-                        # Save previous question if it exists
-                        if current_question and current_options:
-                            questions.append({
-                                'question': current_question['text'].strip(),
-                                'options': current_options[:],
-                                'category': current_question.get('category', 'General'),
-                                'correct_answer_index': 0,  # Will be updated from answers
-                                'explanation': '',
-                                'difficulty': 'Intermediate'
-                            })
-                        
-                        # Start new question
-                        question_num = int(q_match.group(1))
-                        category = self._normalize_category_name(q_match.group(2) if q_match.group(2) else current_category)
-                        question_text = q_match.group(3).strip()
-                        
-                        # Handle the case where question text might be on the next line
-                        if not question_text:
-                            question_text = ""
-                        
-                        current_question = {
-                            'number': question_num,
-                            'text': question_text,
-                            'category': category
-                        }
-                        current_options = []
-                        current_category = category  # Update current category
-                        
-                        print(f"📝 Found question {question_num}: {question_text[:50]}...")
-                        continue
-                    
-                    # Option pattern: A. Option text, B. Option text, etc.
-                    option_match = re.match(r'\s*([A-Z])\.\s+(.+)', line)
-                    if option_match and current_question:
-                        option_letter = option_match.group(1)
-                        option_text = option_match.group(2).strip()
-                        current_options.append(option_text)
-                        continue
-                    
-                    # If we have current_question but line doesn't match option pattern,
-                    # it might be a continuation of the question text or the actual question text
-                    if current_question and not option_match and not q_match:
-                        line_stripped = line.strip()
-                        if line_stripped:  # Only add non-empty lines
-                            if current_question['text']:
-                                current_question['text'] += ' ' + line_stripped
-                            else:
-                                # This might be the actual question text if it was empty before
-                                current_question['text'] = line_stripped
-                        continue
-                
-                elif in_answers_section:
-                    # Answer pattern: **A1.** A. Correct option
-                    # or: **A1.** A
-                    a_match = re.match(r'\*\*A(\d+)\.\*\*\s*([A-Z])(?:\.\s*(.*))?', line)
-                    if a_match:
-                        question_num = int(a_match.group(1))
-                        correct_letter = a_match.group(2)
-                        # Convert letter to index (A=0, B=1, C=2, D=3)
-                        correct_index = ord(correct_letter) - ord('A')
-                        answers_map[question_num] = correct_index
-                        print(f"📝 Answer for Q{question_num}: {correct_letter} (index {correct_index})")
-                        continue
-            
-            # Add the last question if it exists
-            if current_question and current_options:
-                questions.append({
-                    'question': current_question['text'].strip(),
-                    'options': current_options,
-                    'category': current_question.get('category', 'General'),
-                    'correct_answer_index': 0,
-                    'explanation': '',
-                    'difficulty': 'Intermediate'
-                })
-            
-            # Update correct answer indices based on answers section
-            for i, question in enumerate(questions):
-                question_num = i + 1  # Assuming sequential numbering
-                if question_num in answers_map:
-                    correct_idx = answers_map[question_num]
-                    if 0 <= correct_idx < len(question['options']):
-                        question['correct_answer_index'] = correct_idx
-                    else:
-                        print(f"⚠️ Invalid answer index {correct_idx} for question {question_num}")
-            
-            print(f"✅ Markdown parser: Successfully parsed {len(questions)} questions")
-            
-            # Debug: Show first few questions
-            for i, q in enumerate(questions[:3]):
-                question_text = q.get('question', 'NO_QUESTION')
-                print(f"🔍 Sample Q{i+1}: {question_text[:50]}...")
-                print(f"    Options: {len(q.get('options', []))} items")
-                print(f"    Category: {q.get('category', 'NO_CATEGORY')}")
-                print(f"    Correct: {q.get('correct_answer_index', 'NO_INDEX')}")
-            
-            return questions
-            
-        except Exception as e:
-            print(f"❌ Markdown parsing error: {e}")
-            import traceback
-            traceback.print_exc()
-            return []
-    
-    def reset_quiz_state(self):
-        """Reset quiz state variables."""
-        self.current_category_filter = None
-        self.current_question_data = None
-        self.current_question_index = -1
-    
-    async def startup_event(self):
-        """Application startup event."""
-        logging.info("Linux+ Study FastAPI application starting up...")
-    
-    async def shutdown_event(self):
-        """Application shutdown event."""
-        logging.info("Linux+ Study FastAPI application shutting down...")
+    def quit_app(self):
+        """Clean shutdown of the application."""
         # Save any pending data
         self.game_state.save_history()
         self.game_state.save_achievements()
-
-    def start_desktop_app(self):
-        """Start the FastAPI application in a desktop window using pywebview."""
-        try:
-            import webview
-            import threading
-            import uvicorn
-            
-            print("🖥️  Starting Desktop Application with pywebview...")
-            print("🚀 FastAPI backend initializing...")
-            
-            # Create FastAPI app
-            app = self.app
-            
-            # Configure uvicorn server
-            config = uvicorn.Config(
-                app=app,
-                host="127.0.0.1",
-                port=5000,
-                log_level="warning",  # Reduce log noise in desktop mode
-                access_log=False
-            )
-            
-            server = uvicorn.Server(config)
-            
-            # Start server in background thread
-            def run_server():
-                import asyncio
-                asyncio.run(server.serve())
-            
-            server_thread = threading.Thread(target=run_server, daemon=True)
-            server_thread.start()
-            
-            # Wait for server to start
-            import time
-            time.sleep(2)
-            
-            # Create desktop window
-            window = webview.create_window(
-                title='Linux+ Study Game',
-                url='http://127.0.0.1:5000',
-                width=1200,
-                height=900,
-                min_size=(800, 600),
-                resizable=True
-            )
-            
-            print("🎯 Desktop app window opening...")
-            print("💡 Close the window or press Ctrl+C to exit")
-            
-            # Start the webview (this blocks until window is closed)
-            webview.start(debug=self.debug)
-            
-        except ImportError:
-            print("❌ pywebview not available. Install with: pip install pywebview")
-            print("🌐 Falling back to web browser mode...")
-            return False
-        except Exception as e:
-            print(f"❌ Error starting desktop app: {e}")
-            return False
         
-        return True
-
-# Add startup and shutdown event handlers
-app_instance = None
-
-def create_app(game_state, debug: bool = False) -> FastAPI:
-    """Factory function to create FastAPI app instance."""
-    global app_instance
-    app_instance = LinuxPlusStudyFastAPI(game_state, debug)
-    
-    # Add event handlers
-    @app_instance.app.on_event("startup")
-    async def startup():
-        await app_instance.startup_event()
-    
-    @app_instance.app.on_event("shutdown")
-    async def shutdown():
-        await app_instance.shutdown_event()
-    
-    return app_instance.app
+        # Close the webview window
+        if self.window:
+            self.window.destroy()
